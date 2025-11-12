@@ -247,7 +247,7 @@ export class HasMany<T extends Model> extends Relation<T> {
 
         const foreignValue = (this.parent as any).getAttribute(this.localKey);
         await dbQuery(
-            `UPDATE ${(this.relatedModel as any).table} SET ${this.foreignKey} = ? WHERE ${(this.relatedModel as any).primaryKey || 'id'} = ?`,
+            `UPDATE ${(this.relatedModel as typeof Model).getTable()} SET ${this.foreignKey} = ? WHERE ${(this.relatedModel as any).primaryKey || 'id'} = ?`,
             [foreignValue, relatedId]
         );
     }
@@ -271,7 +271,7 @@ export class HasMany<T extends Model> extends Relation<T> {
         }
 
         return await dbQuery(
-            `UPDATE ${(this.relatedModel as any).table} SET ${this.foreignKey} = NULL WHERE ${(this.relatedModel as any).primaryKey || 'id'} = ? AND ${this.foreignKey} = ?`,
+            `UPDATE ${(this.relatedModel as typeof Model).getTable()} SET ${this.foreignKey} = NULL WHERE ${(this.relatedModel as any).primaryKey || 'id'} = ? AND ${this.foreignKey} = ?`,
             [relatedId, foreignValue]
         ).then((result: any) => result.affectedRows || 0);
     }
@@ -439,7 +439,7 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
 
         const placeholders = relatedIds.map(() => '?').join(',');
         const rows = await dbQuery<any>(
-            `SELECT * FROM ${(this.relatedModel as any).table} WHERE ${this.relatedPrimaryKey} IN (${placeholders})`,
+            `SELECT * FROM ${(this.relatedModel as typeof Model).getTable()} WHERE ${this.relatedPrimaryKey} IN (${placeholders})`,
             relatedIds
         );
 

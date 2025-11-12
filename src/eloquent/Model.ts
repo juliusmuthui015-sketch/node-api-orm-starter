@@ -29,8 +29,6 @@ export abstract class Model {
     constructor(attributes: ModelAttributes = {}) {
         this.fill(attributes);
         this.original = { ...this.attributes };
-        this.table = this.getTable();
-
         return new Proxy(this, {
             get: (target: any, prop: PropertyKey, receiver: any) => {
                 if (typeof prop === 'string') {
@@ -66,6 +64,11 @@ export abstract class Model {
             }
         });
     }
+
+    // Add this getter to access the table name
+    // protected get table(): string {
+    //     return (this.constructor as typeof Model).getTable();
+    // }
 
     // Enhanced methods with additional features
     hydrate(attributes: ModelAttributes): this {
@@ -179,29 +182,29 @@ export abstract class Model {
 
     // Enhanced relationship methods with chaining support
     hasOne(model: typeof Model, foreignKey?: string, localKey?: string): HasOne<any> {
-        const table = (this.constructor as any).table as string;
+        const table = (this.constructor as typeof Model).getTable();
         const fk = foreignKey || `${table}_id`;
         const lk = localKey || ((this.constructor as any).primaryKey || 'id');
         return new HasOne(model, fk, lk, this);
     }
 
     hasMany(model: typeof Model, foreignKey?: string, localKey?: string): HasMany<any> {
-        const table = (this.constructor as any).table as string;
+        const table = (this.constructor as typeof Model).getTable();
         const fk = foreignKey || `${table}_id`;
         const lk = localKey || ((this.constructor as any).primaryKey || 'id');
         return new HasMany(model, fk, lk, this);
     }
 
     belongsTo(model: typeof Model, foreignKey?: string, ownerKey?: string): BelongsTo<any> {
-        const relatedTable = (model as any).table as string;
+        const relatedTable = (model as typeof Model).getTable();
         const fk = foreignKey || `${relatedTable}_id`;
         const ok = ownerKey || ((model as any).primaryKey || 'id');
         return new BelongsTo(model, fk, ok, this);
     }
 
     belongsToMany(model: typeof Model, table?: string, foreignPivotKey?: string, relatedPivotKey?: string): BelongsToMany<any> {
-        const parentTable = (this.constructor as any).table as string;
-        const relatedTable = (model as any).table as string;
+        const parentTable = (this.constructor as typeof Model).getTable();
+        const relatedTable = (model as typeof Model).getTable();
         const pivotTable = table || [parentTable, relatedTable].sort().join('_');
         const foreignKey = foreignPivotKey || `${parentTable}_id`;
         const relatedKey = relatedPivotKey || `${relatedTable}_id`;
@@ -240,7 +243,7 @@ export abstract class Model {
     // Enhanced persistence methods
     async save(options: { force?: boolean } = {}): Promise<this> {
         const staticClass = this.constructor as typeof Model & { table: string; primaryKey: string; timestamps?: boolean };
-        const table = staticClass.table;
+        const table = staticClass.getTable();
         const primaryKey = staticClass.primaryKey || 'id';
         const now = new Date();
 
@@ -288,7 +291,7 @@ export abstract class Model {
 
     async delete(force: boolean = false): Promise<boolean> {
         const staticClass = this.constructor as typeof Model & { table: string; primaryKey: string; softDeletes?: boolean };
-        const table = staticClass.table;
+        const table = staticClass.getTable();
         const primaryKey = staticClass.primaryKey || 'id';
         const id = this.getAttribute(primaryKey);
         if (id === undefined || id === null) return false;
@@ -310,7 +313,7 @@ export abstract class Model {
         const staticClass = this.constructor as typeof Model & { table: string; primaryKey: string; softDeletes?: boolean };
         if (!(staticClass as any).softDeletes) return false;
 
-        const table = staticClass.table;
+        const table = staticClass.getTable();
         const primaryKey = staticClass.primaryKey || 'id';
         const id = this.getAttribute(primaryKey);
         if (id === undefined || id === null) return false;
@@ -399,6 +402,28 @@ export abstract class Model {
         return this.query<M>().first() as Promise<InstanceType<M> | null>;
     }
 
+    // Static table name resolution
+    static getTable(): string {
+        // If table name is explicitly set, use it
+        if (this.table && this.table !== "") {
+            return this.table;
+        }
+
+        // Generate table name from class name
+        let tableName = this.name;
+
+        // Convert PascalCase to snake_case
+        tableName = tableName
+            .replace(/([A-Z])/g, '_$1')
+            .toLowerCase()
+            .replace(/^_/, '');
+
+        // Pluralize
+        tableName = this.pluralize(tableName);
+
+        return tableName;
+    }
+
     // Utility methods
     private castAttribute(key: string, value: any): any {
         const staticClass = this.constructor as typeof Model;
@@ -440,8 +465,8 @@ export abstract class Model {
         return (this.constructor as typeof Model).primaryKey;
     }
 
-    // Enhanced pluralization with more comprehensive rules
-    private pluralize(word: string): string {
+    // Static pluralization method
+    private static pluralize(word: string): string {
         // Comprehensive irregular plurals
         const irregularPlurals: Record<string, string> = {
             // Common irregulars
@@ -526,47 +551,8 @@ export abstract class Model {
         return word + 's';
     }
 
-    private looksPlural(word: string): boolean {
+    private static looksPlural(word: string): boolean {
         const pluralEndings = ['s', 'es', 'ies', 'ves', 'i', 'a', 'en'];
         return pluralEndings.some(ending => word.toLowerCase().endsWith(ending));
-    }
-
-    private getTable(): string {
-        const staticClass = this.constructor as typeof Model;
-
-        // Use explicitly set table name if provided
-        if (staticClass.table && staticClass.table !== "") {
-            return staticClass.table;
-        }
-
-        // Generate table name from class name
-        let tableName = this.constructor.name;
-
-        // Convert PascalCase to snake_case
-        tableName = tableName
-            .replace(/([A-Z])/g, '_$1')
-            .toLowerCase()
-            .replace(/^_/, '');
-
-        // Pluralize
-        tableName = this.pluralize(tableName);
-
-        return tableName;
-    }
-
-    // Make it available as a static method too
-    static getTableName(): string {
-        if (this.table && this.table !== "") {
-            return this.table;
-        }
-
-        let tableName = this.name;
-        tableName = tableName
-            .replace(/([A-Z])/g, '_$1')
-            .toLowerCase()
-            .replace(/^_/, '');
-
-        // You'll need to implement pluralize as a static method or reuse the instance one
-        return tableName + 's'; // Simple fallback
     }
 }

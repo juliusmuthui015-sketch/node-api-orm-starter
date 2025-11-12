@@ -341,7 +341,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async update(values: Partial<Record<string, any>>): Promise<number> {
-        const tableName = (this.model as any).table as string;
+        const tableName = (this.model as typeof Model).getTable();
         const keys = Object.keys(values || {});
         if (!keys.length) return 0;
 
@@ -355,7 +355,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async increment(column: string, amount: number = 1): Promise<number> {
-        const tableName = (this.model as any).table as string;
+        const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const sql = `UPDATE ${tableName} SET ${column} = ${column} + ?${where.sql}`;
         const params = [amount, ...where.params];
@@ -364,7 +364,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async decrement(column: string, amount: number = 1): Promise<number> {
-        const tableName = (this.model as any).table as string;
+        const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const sql = `UPDATE ${tableName} SET ${column} = ${column} - ?${where.sql}`;
         const params = [amount, ...where.params];
@@ -373,7 +373,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async delete(): Promise<number> {
-        const tableName = (this.model as any).table as string;
+        const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const supportsSoft = Boolean((this.model as any).softDeletes);
 
@@ -392,7 +392,7 @@ export class EloquentBuilder<T extends Model> {
 
     async insert(rows: Array<Record<string, any>>): Promise<number> {
         if (!rows || !rows.length) return 0;
-        const tableName = (this.model as any).table as string;
+        const tableName = (this.model as typeof Model).getTable();
         const cols = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
         const placeholdersRow = `(${cols.map(() => '?').join(',')})`;
         const placeholders = new Array(rows.length).fill(placeholdersRow).join(',');
@@ -404,7 +404,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async insertGetId(row: Record<string, any>): Promise<number> {
-        const tableName = (this.model as any).table as string;
+        const tableName = (this.model as typeof Model).getTable();
         const cols = Object.keys(row);
         const placeholders = `(${cols.map(() => '?').join(',')})`;
         const sql = `INSERT INTO ${tableName} (${cols.join(',')}) VALUES ${placeholders}`;
@@ -433,7 +433,7 @@ export class EloquentBuilder<T extends Model> {
 
     // Private methods
     private async aggregate(functionName: string, column: string): Promise<string> {
-        const tableName = (this.model as any).table as string;
+        const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const sql = `SELECT ${functionName.toUpperCase()}(${column}) as agg FROM ${tableName}${where.sql}`;
         const rows = await dbQuery<any>(sql, where.params);
@@ -508,7 +508,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     private async executeQuery(): Promise<any[]> {
-        const tableName = (this.model as any).table as string;
+        const tableName = (this.model as typeof Model).getTable();
         const select = this.distinctValue ? 'SELECT DISTINCT' : 'SELECT';
         const columns = this.selectedColumns && this.selectedColumns.length ? this.selectedColumns.join(',') : '*';
         const base = `${select} ${columns} FROM ${tableName}`;
@@ -555,7 +555,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     private async getCount(): Promise<number> {
-        const tableName = (this.model as any).table as string;
+        const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const sql = `SELECT COUNT(*) as count FROM ${tableName}${where.sql}`.trim();
         const rows = await dbQuery<any>(sql, where.params);
@@ -582,7 +582,7 @@ export class EloquentBuilder<T extends Model> {
         if (!rel) return;
 
         const relatedModel = rel.model as typeof Model;
-        const relatedTable = (relatedModel as any).table as string;
+        const relatedTable = (relatedModel as typeof Model).getTable();
         const relatedPK = (relatedModel as any).primaryKey as string;
 
         if (rel.type === 'hasOne') {
@@ -600,7 +600,7 @@ export class EloquentBuilder<T extends Model> {
 
     private async loadHasOne(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
-        const foreignKey = rel.foreignKey || `${(this.model as any).table}_id`;
+        const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
         const localIds = Array.from(new Set(models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined)));
 
         if (!localIds.length) return;
@@ -639,7 +639,7 @@ export class EloquentBuilder<T extends Model> {
 
     private async loadHasMany(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
-        const foreignKey = rel.foreignKey || `${(this.model as any).table}_id`;
+        const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
         const localIds = Array.from(new Set(models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined)));
 
         if (!localIds.length) {
@@ -726,7 +726,7 @@ export class EloquentBuilder<T extends Model> {
     private async loadBelongsToMany(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const pivotTable = rel.table;
         const parentPK = (this.model as any).primaryKey || 'id';
-        const foreignPivotKey = rel.foreignKey || `${(this.model as any).table}_id`;
+        const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
         const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
         const parentIds = Array.from(new Set(models.map(m => (m as any).getAttribute(parentPK)).filter((v: any) => v !== undefined && v !== null)));
 
@@ -787,7 +787,7 @@ export class EloquentBuilder<T extends Model> {
     private async loadMorphRelations(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         // Implementation for morph relationships
         // This is a simplified version - you can expand this based on your needs
-        const morphType = rel.morphName || (this.model as any).table;
+        const morphType = rel.morphName || (this.model as typeof Model).getTable();
         const foreignKey = rel.foreignKey || `${morphType}_id`;
         const morphTypeKey = rel.morphType || `${morphType}_type`;
 

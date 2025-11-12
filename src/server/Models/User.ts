@@ -1,7 +1,7 @@
 import {Model} from "../../eloquent/Model";
 
 export class User extends Model {
-    static table = 'users';
+    // static table = 'users';
     static primaryKey = 'id';
     static fillable = [
         'name','email','email_verified_at','password','active','last_login','last_seen_at',
