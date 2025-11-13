@@ -52,6 +52,22 @@ async function bootstrap() {
     app.use('/api/roles', roleRoutes);
     app.use('/api/permissions', permissionRoutes);
 
+    // Optional migration lock monitoring endpoint
+    const enableLockEndpoint = String(process.env.ENABLE_MIGRATION_LOCK_ENDPOINT || '').toLowerCase();
+    if (enableLockEndpoint === '1' || enableLockEndpoint === 'true') {
+      app.get('/internal/migrations/lock', async (req, res) => {
+        try {
+          const lockName = (req.query.name as string) || process.env.MIGRATION_LOCK_NAME || 'rentivo_migrations_lock';
+          const rows: any = await _dbQuery('SELECT IS_FREE_LOCK(?) as is_free, IS_USED_LOCK(?) as holder', [lockName, lockName]);
+          const r = rows && rows[0] ? rows[0] : null;
+          return res.json({ lockName, isFree: r ? r.is_free === 1 : null, holder: r ? r.holder : null });
+        } catch (e) {
+          return res.status(500).json({ error: String(e) });
+        }
+      });
+      console.log('Migration lock monitoring endpoint enabled at GET /internal/migrations/lock');
+    }
+
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
     });
