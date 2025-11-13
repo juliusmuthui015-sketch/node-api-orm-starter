@@ -8,6 +8,10 @@
     "start": "node build/server/server.js",
     "dev": "ts-node-dev -r tsconfig-paths/register --respawn --transpile-only src/server/server.ts",
     "migrate": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/run-migrations.ts",
+    "migrate:fresh": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/migrate-fresh.ts",
+    "make:migration": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/make-migration.ts",
+    "db:seed": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/run-seeders.ts",
+    "test:lock": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/test-lock.ts",
     "seed": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/seeders/seed.ts",
     "sync:permissions": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/seeders/sync-permissions.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
