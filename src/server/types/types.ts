@@ -8,7 +8,7 @@ export type TRequestQuery = {
     page?: number;
     limit?: number;
     sort?: string;
-    order?: string;
+    order?: "asc" | "desc" | undefined;
 }
 
 export type TRequestHeaders = {
@@ -48,7 +48,8 @@ export type TDefault = {
 export type TUser = TDefault & {
     name: string;
     email: string;
-    password: string;
+    password?: string;
+    confirm_password?: string;
     active_status: number;
     phone_number: string;
     roles: TRole[];

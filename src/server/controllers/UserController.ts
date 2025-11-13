@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import userService from '@/server/services/UserService';
 import {parseRequest} from "@/server/helpers/auth";
+import {TUser} from "@/server/types/types";
 
 export default {
   async index(req: Request, res: Response) {
@@ -14,10 +15,17 @@ export default {
     res.json(item);
   },
   async store(req: Request, res: Response) {
-    const payload = { ...req.body };
-    if (payload.password) payload.password = await bcrypt.hash(payload.password, 10);
-    const item = await userService.create(payload);
-    res.status(201).json(item);
+      try {
+          const payload = {...req.body} as TUser;
+          if (payload.password !== payload.confirm_password) return res.status(400).json({message: 'Passwords do not match'});
+          if (payload.password) payload.password = await bcrypt.hash(payload.password, 10);
+          if (payload.confirm_password) delete payload.confirm_password;
+          const item = await userService.create(payload);
+          res.status(201).json(item);
+      }
+      catch (e) {
+          res.status(500).json({ message: (e as any).message ||'Internal server error' , error: {...(e as any), message: (e as any).message}});
+      }
   },
   async update(req: Request, res: Response) {
     const payload = { ...req.body };

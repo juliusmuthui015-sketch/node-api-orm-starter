@@ -11,14 +11,22 @@ export class UserService {
             .orWhere('email', 'like', `%${query.search}%`)
             .orWhere('phone_number', 'like', `%${query.search}%`);
       }
-      // parse pagination params safely (page must be >= 1 to avoid negative OFFSET)
-      const limit = Number(query.limit) && Number(query.limit) > 0 ? Math.floor(Number(query.limit)) : 10;
-      const page = Number(query.page) && Number(query.page) > 0 ? Math.floor(Number(query.page)) : 1;
+      if (query.sort) {
+        users.orderBy(query.sort, query.order || 'asc');
+      }
 
-      return await users.paginate(limit, page);
+      return await users.with(['roles', 'roles.permissions']).paginate(query.limit, query.page);
   }
-  async find(id: number|string) { return User.find(id); }
-  async create(data: ModelAttributes) { return User.create(data); }
+  async find(id: number|string) {
+      return await User.with(['roles', 'roles.permissions']).findOrFail(id);
+  }
+  async create(data: ModelAttributes) {
+      let user = User.query();
+      user.where('email', '=', data.email).orWhere('phone_number', '=', data.phone_number);
+      if (await user.first()) throw new Error('User already exists');
+
+      return User.create(data);
+  }
   async update(id: number|string, data: ModelAttributes) {
     const user = await User.find(id);
     if(!user) return null;
