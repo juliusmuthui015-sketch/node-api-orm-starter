@@ -1,7 +1,7 @@
 // relationships.ts
 import { Model } from './Model';
 import { EloquentBuilder } from './EloquentBuilder';
-import { query as dbQuery } from '../config/db.config';
+import { query as dbQuery } from '@/config/db.config';
 
 export abstract class Relation<T extends Model> {
     protected query: EloquentBuilder<T>;

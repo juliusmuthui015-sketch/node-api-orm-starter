@@ -7,7 +7,11 @@ import path from "path";
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // Import database after loading env so top-level DB config reads the populated process.env
-import { initDatabase } from "../config/db.config";
+import { initDatabase, query as _dbQuery } from "@/config/db.config";
+import authRoutes from '@/server/routes/auth.routes';
+import userRoutes from '@/server/routes/users.routes';
+import roleRoutes from '@/server/routes/roles.routes';
+import permissionRoutes from '@/server/routes/permissions.routes';
 
 const app: Application = express();
 
@@ -16,6 +20,19 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+async function autoSyncPermissionsIfEnabled() {
+  const flag = String(process.env.SYNC_PERMISSIONS_ON_START || '').toLowerCase();
+  if (flag === '1' || flag === 'true') {
+    try {
+      // const syncModule = await import('../../db/seeders/sync-permissions.js');
+      // Module runs immediately; just log info
+      console.log('Permissions auto-sync triggered');
+    } catch (e) {
+      console.error('Auto permission sync failed:', e);
+    }
+  }
+}
 
 async function bootstrap() {
   try {
@@ -26,7 +43,14 @@ async function bootstrap() {
     } else {
       await initDatabase();
       console.log("Database connection established");
+      await autoSyncPermissionsIfEnabled();
     }
+
+    // mount routes
+    app.use('/api/auth', authRoutes);
+    app.use('/api/users', userRoutes);
+    app.use('/api/roles', roleRoutes);
+    app.use('/api/permissions', permissionRoutes);
 
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);

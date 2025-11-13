@@ -1,11 +1,15 @@
 // EloquentBuilder.ts
 import { Model } from './Model';
 import { WhereClause, QueryResult, JoinClause, EagerLoadOptions } from './types';
-import { query as dbQuery } from '../config/db.config';
+import { query as dbQuery } from '@/config/db.config';
 
 export class EloquentBuilder<T extends Model> {
     private model: typeof Model;
     private withRelations: Map<string, EagerLoadOptions> = new Map();
+    private nestedRelations: Map<string, Set<string>> = new Map();
+    // New: store full path options and a tree for arbitrary depth
+    private relationPathOptions: Map<string, EagerLoadOptions> = new Map();
+    private relationTree: Record<string, any> = {};
     private whereClauses: WhereClause[] = [];
     private havingClauses: WhereClause[] = [];
     private joinClauses: JoinClause[] = [];
@@ -22,11 +26,50 @@ export class EloquentBuilder<T extends Model> {
         this.model = model;
     }
 
+    public getRelationTree(): Record<string, any> {
+        return this.relationTree;
+    }
+
     with(relations: string | string[] | Record<string, any>): this {
+        const addPathToTree = (path: string) => {
+            const segments = path.split('.');
+            let cursor = this.relationTree;
+            for (let i = 0; i < segments.length; i++) {
+                const seg = segments[i];
+                if (!cursor[seg]) cursor[seg] = {};
+                cursor = cursor[seg];
+            }
+        };
+        const ensureTopLevel = (top: string, options: EagerLoadOptions) => {
+            if (!this.withRelations.has(top)) {
+                this.withRelations.set(top, options);
+            }
+        };
+        const registerNestedPairs = (segments: string[]) => {
+            for (let i = 0; i < segments.length - 1; i++) {
+                const parent = segments[i];
+                const child = segments[i + 1];
+                if (!this.nestedRelations.has(parent)) this.nestedRelations.set(parent, new Set());
+                this.nestedRelations.get(parent)!.add(child);
+            }
+        };
+        const addRel = (rel: string, options: EagerLoadOptions = {}) => {
+            this.relationPathOptions.set(rel, options);
+            addPathToTree(rel);
+            const segments = rel.split('.');
+            ensureTopLevel(segments[0], {}); // Always load top-most
+            if (segments.length > 1) {
+                registerNestedPairs(segments);
+            } else {
+                // top-level specific options
+                if (!this.withRelations.has(rel)) this.withRelations.set(rel, options);
+            }
+        };
+
         if (typeof relations === 'string') {
-            this.withRelations.set(relations, {});
+            addRel(relations, {});
         } else if (Array.isArray(relations)) {
-            relations.forEach(r => this.withRelations.set(r, {}));
+            relations.forEach(r => addRel(r, {}));
         } else if (relations && typeof relations === 'object') {
             Object.entries(relations).forEach(([key, val]) => {
                 const options: EagerLoadOptions = {};
@@ -37,7 +80,7 @@ export class EloquentBuilder<T extends Model> {
                 } else if (val && typeof val === 'object') {
                     Object.assign(options, val as EagerLoadOptions);
                 }
-                this.withRelations.set(key, options);
+                addRel(key, options);
             });
         }
         return this;
@@ -244,15 +287,39 @@ export class EloquentBuilder<T extends Model> {
         });
 
         if (this.withRelations.size > 0) {
+            // Load top-level relations first
             await this.loadRelationships(models);
+            // Recursively load nested relations using relationTree (covers any depth)
+            await this.loadRelationTree(models, this.relationTree, '');
         }
 
-        return models.map(m => (typeof (m as any).toJSON === 'function' ? (m as any).toJSON() : (m as any)));
+        // Return the actual Model instances, NOT their JSON representation
+        return models
+        //     .map(m => {
+        //     if (typeof (m as any).toJSON === 'function') {
+        //         // Pass the relation tree to toJSON for proper nested serialization
+        //         return (m as any).toJSON({
+        //             relationTree: this.relationTree,
+        //             maxDepth: 10 // You can make this configurable
+        //         });
+        //     }
+        //     return m;
+        // });
     }
 
     async toArray(): Promise<any[]> {
         const models = await this.get();
-        return models.map(m => (typeof (m as any).toJSON === 'function' ? (m as any).toJSON() : (m as any)));
+        // Convert to JSON with proper nested relationship handling
+        return models.map(m => {
+            if (typeof (m as any).toJSON === 'function') {
+                // Pass the relation tree to toJSON for proper nested serialization
+                return (m as any).toJSON({
+                    relationTree: this.relationTree,
+                    maxDepth: 10 // You can make this configurable
+                });
+            }
+            return m;
+        });
     }
 
     async first(): Promise<T | null> {
@@ -569,18 +636,57 @@ export class EloquentBuilder<T extends Model> {
         }
     }
 
+    // Replace old single-level nested loader with recursive tree loader
+    private async loadRelationTree(currentModels: any[], tree: Record<string, any>, parentPath: string): Promise<void> {
+        if (!currentModels.length) return;
+        for (const relName of Object.keys(tree)) {
+            const currentPath = parentPath ? `${parentPath}.${relName}` : relName;
+            const options = this.relationPathOptions.get(currentPath) || {};
+            // Determine if relation is top-level or deeper
+            if (parentPath === '') {
+                // Already loaded top-level in loadRelationships; skip duplicate load unless options provided that weren't applied
+                if (options.constraints || options.columns) {
+                    // Re-load with constraints if user passed options specifically for full path
+                    await this.loadRelationship(currentModels, relName, options);
+                }
+            } else {
+                // Need to load relation on nested model instances
+                // Build a temporary builder for nested model type
+                const sampleModel = currentModels.find(m => typeof m?.getRelationship === 'function' && m.getRelationship(relName));
+                if (!sampleModel) continue;
+                const tmpBuilder = new EloquentBuilder(sampleModel.constructor as typeof Model);
+                await tmpBuilder.loadRelationship(currentModels as any, relName, options);
+            }
+            // Gather child instances to recurse
+            const childContainer: any[] = [];
+            currentModels.forEach(m => {
+                const loaded = (m as any).relationshipsLoaded?.[relName];
+                if (!loaded) return;
+                if (Array.isArray(loaded)) childContainer.push(...loaded);
+                else childContainer.push(loaded);
+            });
+            // Recurse into subtree
+            const subtree = tree[relName];
+            if (subtree && Object.keys(subtree).length > 0 && childContainer.length > 0) {
+                await this.loadRelationTree(childContainer, subtree, currentPath);
+            }
+        }
+    }
+
     private setRelation(model: T, name: string, value: any) {
         (model as any).relationshipsLoaded = (model as any).relationshipsLoaded || {};
         (model as any).relationshipsLoaded[name] = value;
     }
 
-    private async loadRelationship(models: T[], relation: string, options: EagerLoadOptions = {}): Promise<void> {
+    // Make loadRelationship public so nested loader can instantiate a new builder and reuse logic
+    public async loadRelationship(models: T[], relation: string, options: EagerLoadOptions = {}): Promise<void> {
         if (!models.length) return;
-
-        const parentModelClass = this.model as typeof Model & { relationships?: any };
-        const rel = (parentModelClass.relationships || {})[relation];
-        if (!rel) return;
-
+        const sampleModel = models[0];
+        const rel = (sampleModel as any).getRelationship(relation);
+        if (!rel) {
+            console.warn(`Relationship "${relation}" not found for model ${(sampleModel as any).constructor?.name || 'Unknown'}`);
+            return;
+        }
         const relatedModel = rel.model as typeof Model;
         const relatedTable = (relatedModel as typeof Model).getTable();
         const relatedPK = (relatedModel as any).primaryKey as string;
@@ -597,7 +703,6 @@ export class EloquentBuilder<T extends Model> {
             await this.loadMorphRelations(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
         }
     }
-
     private async loadHasOne(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
         const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;

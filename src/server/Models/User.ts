@@ -1,4 +1,5 @@
-import {Model} from "../../eloquent/Model";
+import {Model} from "@/eloquent/Model";
+import Role from './Role';
 
 export class User extends Model {
     // static table = 'users';
@@ -20,6 +21,17 @@ export class User extends Model {
         last_seen_at: 'datetime'
     } as any;
 
+    // static relationships = {
+    //     roles: {
+    //         type: 'belongsToMany',
+    //         model: Role,
+    //         table: ['roles', 'users'].sort().join('_') // roles_users
+    //     }
+    // } as any;
+
+    roles(){
+        return this.belongsToMany(Role, 'roles_users', 'users_id', 'roles_id')
+    }
     // defaults for new instances
     constructor(attributes: any = {}) {
         super({ avatar: 'avatar.png', active_status: 0, dark_mode: 0, ...attributes });

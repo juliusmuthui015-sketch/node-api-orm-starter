@@ -2,7 +2,20 @@
 import { ModelAttributes, RelationshipConfig, Casts } from './types';
 import { EloquentBuilder } from './EloquentBuilder';
 import { HasOne, HasMany, BelongsTo, BelongsToMany } from './relationships';
-import { query as dbQuery } from '../config/db.config';
+import { query as dbQuery } from '@/config/db.config';
+import util from 'util';
+
+// Add this interface for type safety
+export interface ToJSONOptions {
+    maxDepth?: number;
+    currentDepth?: number;
+    visited?: WeakSet<any>;
+    include?: string[];
+    exclude?: string[];
+    withRelations?: boolean;
+    includeMetadata?: boolean;
+    relationTree?: any;
+}
 
 export abstract class Model {
     [key: string]: any;
@@ -142,6 +155,143 @@ export abstract class Model {
         return this;
     }
 
+    /**
+     * Get relationship configuration for a given relation name
+     * Supports both static relationships and instance method relationships
+     */
+    protected getRelationship(relation: string): RelationshipConfig | null {
+        const staticClass = this.constructor as typeof Model;
+
+        // First check static relationships
+        if (staticClass.relationships && staticClass.relationships[relation]) {
+            return staticClass.relationships[relation];
+        }
+
+        // Then check if there's an instance method for this relationship
+        if (typeof (this as any)[relation] === 'function') {
+            try {
+                const relationInstance = (this as any)[relation]();
+                return this.convertRelationToConfig(relationInstance, relation);
+            } catch (error) {
+                console.warn(`Failed to get relationship "${relation}" from instance method:`, error);
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Convert a relation instance to a RelationshipConfig
+     */
+    private convertRelationToConfig(relationInstance: any, relationName: string): RelationshipConfig | null {
+        if (relationInstance instanceof HasOne) {
+            return {
+                type: 'hasOne',
+                model: (relationInstance as any).relatedModel,
+                foreignKey: (relationInstance as any).foreignKey,
+                localKey: (relationInstance as any).localKey
+            };
+        } else if (relationInstance instanceof HasMany) {
+            return {
+                type: 'hasMany',
+                model: (relationInstance as any).relatedModel,
+                foreignKey: (relationInstance as any).foreignKey,
+                localKey: (relationInstance as any).localKey
+            };
+        } else if (relationInstance instanceof BelongsTo) {
+            return {
+                type: 'belongsTo',
+                model: (relationInstance as any).relatedModel,
+                foreignKey: (relationInstance as any).foreignKey,
+                ownerKey: (relationInstance as any).ownerKey
+            };
+        } else if (relationInstance instanceof BelongsToMany) {
+            return {
+                type: 'belongsToMany',
+                model: (relationInstance as any).relatedModel,
+                table: (relationInstance as any).pivotTable,
+                foreignKey: (relationInstance as any).foreignPivotKey,
+                relatedKey: (relationInstance as any).relatedPivotKey
+            };
+        }
+
+        return null;
+    }
+
+    /**
+     * Get all defined relationships (both static and instance)
+     */
+    protected getAllRelationships(): { [key: string]: RelationshipConfig } {
+        const staticClass = this.constructor as typeof Model;
+        const allRelations: { [key: string]: RelationshipConfig } = {};
+
+        // Add static relationships
+        if (staticClass.relationships) {
+            Object.assign(allRelations, staticClass.relationships);
+        }
+
+        // Add instance method relationships
+        const instanceMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(this))
+            .filter(prop => typeof (this as any)[prop] === 'function' && prop !== 'constructor');
+
+        for (const methodName of instanceMethods) {
+            // Skip if already defined in static relationships
+            if (allRelations[methodName]) continue;
+
+            try {
+                const relationInstance = (this as any)[methodName]();
+                const config = this.convertRelationToConfig(relationInstance, methodName);
+                if (config) {
+                    allRelations[methodName] = config;
+                }
+            } catch (error) {
+                // Ignore methods that don't return valid relationship instances
+            }
+        }
+
+        return allRelations;
+    }
+
+    // Update the toJSON method to use getAllRelationships for fallback
+
+    // Update the getRelationSerializationOptions to use getRelationship
+    private getRelationSerializationOptions(relationName: string, parentOptions: ToJSONOptions): ToJSONOptions {
+        const relationConfig = this.getRelationship(relationName);
+
+        // Default options - continue with same settings but increment depth
+        const baseOptions: ToJSONOptions = {
+            maxDepth: parentOptions.maxDepth,
+            currentDepth: parentOptions.currentDepth,
+            visited: parentOptions.visited,
+            withRelations: parentOptions.withRelations,
+            includeMetadata: parentOptions.includeMetadata
+        };
+
+        // Check if there are relationship-specific serialization rules
+        if (relationConfig && (relationConfig as any).serialization) {
+            const serializationConfig = (relationConfig as any).serialization;
+
+            if (serializationConfig.include) {
+                baseOptions.include = serializationConfig.include;
+            }
+
+            if (serializationConfig.exclude) {
+                baseOptions.exclude = serializationConfig.exclude;
+            }
+
+            if (serializationConfig.maxDepth !== undefined) {
+                baseOptions.maxDepth = serializationConfig.maxDepth;
+            }
+
+            if (serializationConfig.withRelations !== undefined) {
+                baseOptions.withRelations = serializationConfig.withRelations;
+            }
+        }
+
+        return baseOptions;
+    }
+
     get attributesToArray(): ModelAttributes {
         const staticClass = this.constructor as typeof Model;
         const result: ModelAttributes = {};
@@ -153,19 +303,167 @@ export abstract class Model {
         return result;
     }
 
-    toJSON(): any {
-        const obj: any = { ...this.attributesToArray };
-        Object.keys(this.relationshipsLoaded).forEach(rel => {
-            const val = this.relationshipsLoaded[rel];
-            if (Array.isArray(val)) {
-                obj[rel] = val.map(v => (v && typeof v.toJSON === 'function') ? v.toJSON() : v);
-            } else if (val && typeof val.toJSON === 'function') {
-                obj[rel] = val.toJSON();
+
+
+    private applyAttributeFilters(obj: any, include: string[], exclude: string[]): void {
+        if (include.length > 0) {
+            // Only include specified attributes
+            Object.keys(obj).forEach(key => {
+                if (!include.includes(key)) {
+                    delete obj[key];
+                }
+            });
+        } else if (exclude.length > 0) {
+            // Exclude specified attributes
+            exclude.forEach(key => {
+                delete obj[key];
+            });
+        }
+    }
+
+
+    private addMetadata(obj: any): void {
+        const staticClass = this.constructor as typeof Model;
+
+        obj.$metadata = {
+            model: staticClass.name,
+            table: staticClass.getTable(),
+            primaryKey: staticClass.primaryKey,
+            timestamps: staticClass.timestamps,
+            softDeletes: staticClass.softDeletes,
+            loadedRelations: Object.keys(this.relationshipsLoaded),
+            isDirty: this.isDirty(),
+            exists: this.getAttribute(staticClass.primaryKey) !== undefined
+        };
+    }
+
+    toJSON(options: ToJSONOptions & { relationTree?: Record<string, any> } = {}): any {
+        const {
+            maxDepth = 10,
+            currentDepth = 0,
+            visited = new WeakSet(),
+            include = [],
+            exclude = [],
+            withRelations = true,
+            relationTree = {},
+            includeMetadata = false
+        } = options;
+
+        if (visited.has(this)) {
+            return '[Circular]';
+        }
+        visited.add(this);
+
+        if (currentDepth >= maxDepth) {
+            return '[Max Depth Reached]';
+        }
+
+        // Build relationTree from include dot-paths and separate attribute includes
+        const knownRelations = new Set<string>([
+            ...Object.keys(this.relationshipsLoaded || {}),
+            ...Object.keys(this.getAllRelationships() || {})
+        ]);
+        const computedTree: Record<string, any> = { ...(relationTree || {}) };
+        const directRelations = new Set<string>();
+        const includeAttr: string[] = [];
+        (include || []).forEach((path) => {
+            if (!path) return;
+            if (path.includes('.')) {
+                const segments = path.split('.');
+                const head = segments.shift() as string;
+                directRelations.add(head);
+                // insert remaining segments into computedTree
+                let cursor = (computedTree[head] = computedTree[head] || {});
+                while (segments.length) {
+                    const seg = segments.shift() as string;
+                    cursor[seg] = cursor[seg] || {};
+                    cursor = cursor[seg];
+                }
             } else {
+                if (knownRelations.has(path)) {
+                    directRelations.add(path);
+                } else {
+                    includeAttr.push(path);
+                }
+            }
+        });
+
+        const obj: any = { ...this.attributesToArray };
+        // Only filter attributes by includeAttr, not relation names
+        this.applyAttributeFilters(obj, includeAttr, exclude);
+
+        if (withRelations && Object.keys(this.relationshipsLoaded).length > 0) {
+            this.serializeRelationships(obj, {
+                maxDepth,
+                currentDepth: currentDepth + 1,
+                visited,
+                // For relation filtering, use directRelations and computedTree
+                include: Array.from(directRelations),
+                exclude,
+                withRelations,
+                relationTree: computedTree
+            });
+        }
+
+        if (withRelations) {
+            const allRelations = this.getAllRelationships();
+            Object.keys(allRelations).forEach(relName => {
+                if (obj[relName] !== undefined) return; // already set
+                // respect include/exclude filters for relations
+                if (directRelations.size > 0 || Object.keys(computedTree).length > 0) {
+                    const allowed = directRelations.has(relName) || computedTree[relName] !== undefined;
+                    if (!allowed) return;
+                }
+                if (exclude.length > 0 && exclude.includes(relName)) return;
+
+                const relType = allRelations[relName].type;
+                obj[relName] = (relType === 'hasOne' || relType === 'belongsTo' || relType === 'morphOne') ? null : [];
+            });
+        }
+
+        if (includeMetadata) {
+            this.addMetadata(obj);
+        }
+
+        return obj;
+    }
+
+    private serializeRelationships(obj: any, options: ToJSONOptions & { relationTree?: Record<string, any> }): void {
+        const directSet = new Set<string>(options.include || []);
+
+        Object.keys(this.relationshipsLoaded).forEach(rel => {
+            if (options.exclude?.includes(rel)) return;
+
+            // If include filtering is present, allow this relation only if it's explicitly included
+            // or has a subtree in relationTree
+            const hasFilter = (options.include && options.include.length > 0) || (options.relationTree && Object.keys(options.relationTree).length > 0);
+            if (hasFilter && !directSet.has(rel) && !(options.relationTree && options.relationTree[rel] !== undefined)) {
+                return;
+            }
+
+            const val = this.relationshipsLoaded[rel];
+            const nestedTree = (options.relationTree && options.relationTree[rel]) || {};
+
+            if (Array.isArray(val)) {
+                obj[rel] = val.map(v => {
+                    if (!v || typeof v.toJSON !== 'function') return v;
+                    const relationOptions = this.getRelationSerializationOptions(rel, options);
+                    relationOptions.relationTree = nestedTree;
+                    // propagate include filter for nested level using subtree keys
+                    relationOptions.include = Object.keys(nestedTree || {});
+                    relationOptions.currentDepth = (options.currentDepth || 0) + 1;
+                    return v.toJSON(relationOptions);
+                }).filter(v => v !== undefined);
+            } else if (val && typeof val.toJSON === 'function') {
+                const relationOptions = this.getRelationSerializationOptions(rel, options);
+                relationOptions.relationTree = nestedTree;
+                relationOptions.include = Object.keys(nestedTree || {});
+                relationOptions.currentDepth = (options.currentDepth || 0) + 1;
+                obj[rel] = val.toJSON(relationOptions);
+            } else if (val !== undefined && val !== null) {
                 obj[rel] = val;
             }
         });
-        return obj;
     }
 
     public setLoadedRelation(name: string, value: any): void {
@@ -554,5 +852,10 @@ export abstract class Model {
     private static looksPlural(word: string): boolean {
         const pluralEndings = ['s', 'es', 'ies', 'ves', 'i', 'a', 'en'];
         return pluralEndings.some(ending => word.toLowerCase().endsWith(ending));
+    }
+
+    [util.inspect.custom](depth: number, options: any) {
+        // Return fully expanded JSON representation for console.log/dir
+        return this.toJSON();
     }
 }

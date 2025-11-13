@@ -4,9 +4,12 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc-alias",
     "start": "node build/server/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server/server.ts",
+    "dev": "ts-node-dev -r tsconfig-paths/register --respawn --transpile-only src/server/server.ts",
+    "migrate": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/run-migrations.ts",
+    "seed": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/seeders/seed.ts",
+    "sync:permissions": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/seeders/sync-permissions.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -14,9 +17,13 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.15.3"
   },
   "devDependencies": {
@@ -24,6 +31,8 @@
     "@types/express": "^5.0.5",
     "@types/node": "^24.10.1",
     "ts-node-dev": "^2.0.0",
+    "tsc-alias": "^1.8.16",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3"
   }
 }
