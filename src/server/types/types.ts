@@ -1,3 +1,43 @@
+export type TFilter = {
+    [key: string]:any
+}
+
+export type TRequestQuery = {
+    [p: string]: any | undefined
+    search?: string;
+    page?: number;
+    limit?: number;
+    sort?: string;
+    order?: string;
+}
+
+export type TRequestHeaders = {
+    authorization?: string;
+    'content-type'?: string;
+    'accept'?: string;
+}
+
+export type TRequest = {
+    params: TRequestParams;
+    query: TRequestQuery;
+    headers: TRequestHeaders;
+    body: any;
+    user?: TRUser;
+}
+export type TRUser = {
+    id: number|string;
+    roles?: string[]|undefined;
+    permissions?: string[]|undefined;
+}
+
+export type TRequestParams = TFilter &{
+    search?: string;
+    page?: number;
+    limit?: number;
+    sort?: string;
+    order?: string;
+}
+
 export type TDefault = {
     id: number|string;
     created_at: string;
@@ -10,6 +50,7 @@ export type TUser = TDefault & {
     email: string;
     password: string;
     active_status: number;
+    phone_number: string;
     roles: TRole[];
 }
 

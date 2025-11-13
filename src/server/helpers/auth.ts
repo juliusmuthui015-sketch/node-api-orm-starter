@@ -1,6 +1,8 @@
 import { asyncLocalStorage } from '@/server/middleware/asyncContext';
 import AuthService from '@/server/services/AuthService';
 import User from '@/server/Models/User';
+import {Request} from "express";
+import {TRequest} from "@/server/types/types";
 
 export function auth() {
   const store = asyncLocalStorage.getStore();
@@ -37,6 +39,11 @@ export function setUser(userModel: any) {
 export function clearUser() {
   const store = asyncLocalStorage.getStore();
   if (store) delete (store as any).user;
+}
+
+export const parseRequest = (req:Request) => {
+    const {query, params, body, headers, user} = req;
+    return {query, params, body, headers, user} as TRequest;
 }
 
 export default auth;

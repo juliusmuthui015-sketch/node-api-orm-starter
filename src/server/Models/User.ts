@@ -7,7 +7,7 @@ export class User extends Model {
     static fillable = [
         'name','email','email_verified_at','password','active','last_login','last_seen_at',
         'last_login_ip','default_role_id','remember_token','created_at','updated_at','deleted_at',
-        'active_status','avatar','dark_mode','messenger_color'
+        'active_status','avatar','dark_mode','messenger_color', 'phone_number'
     ];
     static hidden = ['password', 'remember_token'];
     static casts = {

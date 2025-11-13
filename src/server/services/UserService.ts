@@ -1,8 +1,12 @@
 import User from '@/server/Models/User';
 import { ModelAttributes } from '@/eloquent/types';
+import {TRequest} from "@/server/types/types";
 
 export class UserService {
-  async list() { return User.all(); }
+  async list(request: TRequest) {
+      const {query} = request;
+      return User.all();
+  }
   async find(id: number|string) { return User.find(id); }
   async create(data: ModelAttributes) { return User.create(data); }
   async update(id: number|string, data: ModelAttributes) {

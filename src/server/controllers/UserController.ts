@@ -1,10 +1,11 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import userService from '@/server/services/UserService';
+import {parseRequest} from "@/server/helpers/auth";
 
 export default {
   async index(req: Request, res: Response) {
-    const data = await userService.list();
+    const data = await userService.list(parseRequest(req));
     res.json(data);
   },
   async show(req: Request, res: Response) {

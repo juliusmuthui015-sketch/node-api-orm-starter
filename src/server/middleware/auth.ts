@@ -23,7 +23,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     if (!userModel) return res.status(401).json({ message: 'Unauthorized' });
 
     // compute permissions from roles
-    const roles = (userModel as any).roles || [];
+    const roles = (userModel.toJSON() as any).roles || [];
     const permissionsArr: any[] = [];
     for (const r of roles) {
       permissionsArr.push(...((r as any).permissions || []));
