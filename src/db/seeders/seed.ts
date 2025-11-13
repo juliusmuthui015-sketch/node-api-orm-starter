@@ -1,21 +1,15 @@
 import bcrypt from 'bcrypt';
 import { query, initDatabase } from '../../config/db.config';
 
-async function seed() {
+export async function seed() {
   await initDatabase();
   const now = new Date();
   // Roles
   await query(`INSERT IGNORE INTO roles (id,name,slug,description,created_at,updated_at) VALUES 
-    (1,'Admin','admin','Administrator role',?,?),
-    (2,'User','user','Regular user',?,?)`, [now, now, now, now]);
+    (1,'Admin','admin','Administrator role',?,?),(2,'User','user','Regular user',?,?)`, [now, now, now, now]);
   // Permissions
   await query(`INSERT IGNORE INTO permissions (id,name,slug,description,created_at,updated_at) VALUES 
-    (1,'View Users','view_users','',?,?),
-    (2,'Manage Users','manage_users','',?,?),
-    (3,'View Roles','view_roles','',?,?),
-    (4,'Manage Roles','manage_roles','',?,?),
-    (5,'View Permissions','view_permissions','',?,?),
-    (6,'Manage Permissions','manage_permissions','',?,?)`, [now, now, now, now, now, now, now, now, now, now, now, now]);
+    (1,'View Users','view_users','',?,?),(2,'Manage Users','manage_users','',?,?),(3,'View Roles','view_roles','',?,?),(4,'Manage Roles','manage_roles','',?,?),(5,'View Permissions','view_permissions','',?,?),(6,'Manage Permissions','manage_permissions','',?,?)`, [now, now, now, now, now, now, now, now, now, now, now, now]);
   // Admin user
   const pass = await bcrypt.hash('password', 10);
   await query(`INSERT IGNORE INTO users (id,name,email,password,active_status,created_at,updated_at) VALUES 
@@ -29,4 +23,9 @@ async function seed() {
   console.log('Seeding complete');
 }
 
-seed().catch(err => { console.error(err); process.exit(1); });
+// When run directly, execute the seeder
+if (require.main === module) {
+  seed().catch(err => { console.error(err); process.exit(1); });
+}
+
+export default seed;
