@@ -17,7 +17,8 @@ const socketPath = process.env.DB_SOCKET_PATH || process.env.DB_SOCKET || undefi
 const baseOptions: mysql.PoolOptions = {
     waitForConnections: true,
     connectionLimit: parseInt(process.env.DB_POOL_LIMIT || '10', 10),
-    queueLimit: 0
+    queueLimit: 0,
+    multipleStatements: true // allow migrations that return multiple statements
 };
 
 let pool = mysql.createPool(
@@ -27,7 +28,8 @@ let pool = mysql.createPool(
 );
 
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-    const [rows] = await pool.execute(sql, params);
+    // use query (supports multipleStatements when enabled on pool)
+    const [rows] = await pool.query(sql, params);
     return rows as T[];
 }
 
