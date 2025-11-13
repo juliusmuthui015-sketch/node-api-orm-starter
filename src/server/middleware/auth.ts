@@ -16,8 +16,13 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     const uid = decoded.sub;
     const roles = await authService.getUserRoles(uid);
+    let permissions = []
+    for (const role of roles) {
+      permissions.push(...(role).permissions)
+    }
+    console.log(permissions)
     const perms = await authService.getUserPermissions(uid);
-    req.user = { id: uid, roles, permissions: perms };
+    req.user = { id: uid, roles: (roles)?.map(r => r.slug), permissions: permissions?.map(p => p.slug) };
     next();
   } catch (e) {
     return res.status(401).json({ message: 'Unauthorized' });
