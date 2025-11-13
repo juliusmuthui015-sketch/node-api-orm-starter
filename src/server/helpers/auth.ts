@@ -43,6 +43,8 @@ export function clearUser() {
 
 export const parseRequest = (req:Request) => {
     const {query, params, body, headers, user} = req;
+    query.page = Number(query.page) && Number(query.page) > 0 ? Math.floor(Number(query.page)) : 1 as any;
+    query.limit = Number(query.limit) && Number(query.limit) > 0 ? Math.floor(Number(query.limit)) : 10 as any;
     return {query, params, body, headers, user} as TRequest;
 }
 
