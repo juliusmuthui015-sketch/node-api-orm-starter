@@ -4,8 +4,8 @@ import { ModelAttributes } from '@/eloquent/types';
 import { query } from '@/config/db.config';
 
 class RoleService {
-  async list() { return Role.all(); }
-  async find(id: number|string) { return Role.find(id); }
+  async list() { return Role.with(['permissions']).all(); }
+  async find(id: number|string) { return Role.with(['permissions']).find(id); }
   async create(data: ModelAttributes) { return Role.create(data); }
   async update(id: number|string, data: ModelAttributes) {
     const role = await Role.find(id);
@@ -16,7 +16,7 @@ class RoleService {
   async delete(id: number|string) {
     const role = await Role.find(id);
     if(!role) return false;
-    await (role as any).delete();
+    await (role).delete();
     return true;
   }
   async attachPermissions(roleId: number|string, permissionIds: (number|string)[]) {
