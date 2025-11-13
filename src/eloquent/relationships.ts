@@ -494,12 +494,18 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
             const placeholders = columns.map(() => '?').join(',');
             const values = [parentId, actualRelatedId, ...Object.values(pivotData)];
 
-            await dbQuery(
-                `INSERT INTO ${this.pivotTable} (${columns.join(',')}) VALUES (${placeholders}) 
-         ON DUPLICATE KEY UPDATE ${Object.keys(pivotData).map(k => `${k} = ?`).join(', ')}`,
-                [...values, ...Object.values(pivotData)]
-            );
-        }
+            if (Object.keys(pivotData).length === 0) {
+                // simple insert for two-column pivot without extra data — ignore duplicates
+                await dbQuery(`INSERT IGNORE INTO ${this.pivotTable} (${columns.join(',')}) VALUES (${placeholders})`, values);
+            } else {
+                // upsert with provided pivot data
+                const updateClause = Object.keys(pivotData).map(k => `${k} = ?`).join(', ');
+                await dbQuery(
+                    `INSERT INTO ${this.pivotTable} (${columns.join(',')}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${updateClause}`,
+                    [...values, ...Object.values(pivotData)]
+                );
+            }
+         }
     }
 
     async detach(relatedIds?: (number | string)[]): Promise<number> {
@@ -808,3 +814,4 @@ export class MorphTo<T extends Model> extends Relation<T> {
         return await this.query.first();
     }
 }
+

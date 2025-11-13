@@ -12,6 +12,7 @@ import authRoutes from '@/server/routes/auth.routes';
 import userRoutes from '@/server/routes/users.routes';
 import roleRoutes from '@/server/routes/roles.routes';
 import permissionRoutes from '@/server/routes/permissions.routes';
+import { asyncContextMiddleware } from './middleware/asyncContext';
 
 const app: Application = express();
 
@@ -45,6 +46,9 @@ async function bootstrap() {
       console.log("Database connection established");
       await autoSyncPermissionsIfEnabled();
     }
+
+    // mount middleware
+    app.use(asyncContextMiddleware);
 
     // mount routes
     app.use('/api/auth', authRoutes);

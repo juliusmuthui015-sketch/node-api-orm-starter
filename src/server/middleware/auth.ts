@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import authService from '@/server/services/AuthService';
+import User from '@/server/Models/User';
+import {asyncLocalStorage} from "@/server/middleware/asyncContext";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change';
 
@@ -15,14 +17,26 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
   try {
     const decoded = jwt.verify(token, JWT_SECRET) as any;
     const uid = decoded.sub;
-    const roles = await authService.getUserRoles(uid);
-    let permissions = []
-    for (const role of roles) {
-      permissions.push(...(role).permissions)
+
+    // Load full user model (including roles and permissions)
+    const userModel = await User.with(['roles', 'roles.permissions']).find(uid);
+    if (!userModel) return res.status(401).json({ message: 'Unauthorized' });
+
+    // compute permissions from roles
+    const roles = (userModel as any).roles || [];
+    const permissionsArr: any[] = [];
+    for (const r of roles) {
+      permissionsArr.push(...((r as any).permissions || []));
     }
-    console.log(permissions)
-    const perms = await authService.getUserPermissions(uid);
-    req.user = { id: uid, roles: (roles)?.map(r => r.slug), permissions: permissions?.map(p => p.slug) };
+
+    // set req.user for compatibility and store full model in async local storage
+    req.user = { id: uid, roles: roles.map((r:any)=>r.slug), permissions: permissionsArr.map((p:any)=>p.slug) };
+
+    const store = asyncLocalStorage.getStore();
+    if (store) {
+      store.user = userModel; // store model instance for helpers
+    }
+
     next();
   } catch (e) {
     return res.status(401).json({ message: 'Unauthorized' });
