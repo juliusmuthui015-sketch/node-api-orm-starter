@@ -1,6 +1,6 @@
 import { asyncLocalStorage } from '@/server/middleware/asyncContext';
 import AuthService from '@/server/services/AuthService';
-import User from '@/server/Models/User';
+import { User }from '@/server/Models/User';
 import {Request} from "express";
 import {TRequest} from "@/server/types/types";
 

@@ -1,4 +1,4 @@
-import { Model } from "../../eloquent/Model";
+import { Model } from "@/eloquent/Model";
 
 export class Permission extends Model {
     static table = 'permissions'

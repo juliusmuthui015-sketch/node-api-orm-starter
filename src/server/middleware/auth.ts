@@ -1,8 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import authService from '@/server/services/AuthService';
-import User from '@/server/Models/User';
 import {asyncLocalStorage} from "@/server/middleware/asyncContext";
+import User from "@/server/Models/User/User";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change';
 

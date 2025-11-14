@@ -1,5 +1,5 @@
-import Role from '@/server/Models/Role';
-import Permission from '@/server/Models/Permission';
+import Role from '@/server/Models/User/Role';
+import Permission from '@/server/Models/User/Permission';
 import { ModelAttributes } from '@/eloquent/types';
 import { query } from '@/config/db.config';
 

@@ -1,4 +1,4 @@
-import { Model } from '../eloquent/Model';
+import { Model } from '@/eloquent/Model';
 
 class User extends Model {
   static table = 'users';

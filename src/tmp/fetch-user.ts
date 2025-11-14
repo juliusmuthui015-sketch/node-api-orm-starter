@@ -1,9 +1,10 @@
 import path from 'path';
 // load env early
 import dotenv from 'dotenv';
+import User from "@/server/Models/User/User";
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-import User from '../server/Models/User';
+
 
 async function run() {
   try {

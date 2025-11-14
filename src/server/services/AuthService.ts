@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt';
 import jwt, { Secret, SignOptions, JwtPayload } from 'jsonwebtoken';
-import User from '@/server/Models/User';
 import {TPermission, TRole} from "@/server/types/types";
+import User from "@/server/Models/User/User";
 
 const JWT_SECRET: Secret = (process.env.JWT_SECRET || 'dev-secret-change') as Secret;
 const JWT_EXPIRES_IN: SignOptions['expiresIn'] = (process.env.JWT_EXPIRES_IN || '7d') as any;

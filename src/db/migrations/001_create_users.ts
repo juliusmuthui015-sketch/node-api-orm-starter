@@ -19,10 +19,8 @@ module.exports.up = async function(schema: Schema, _query: QueryFn) {
     table.string('avatar', 191).nullable();
     table.tinyInteger('dark_mode').default(0);
     table.string('messenger_color', 32).nullable();
-    table.datetime('created_at').nullable();
-    table.datetime('updated_at').nullable();
-    table.datetime('deleted_at').nullable();
-
+    table.timestamps();
+    table.softDeletes();
     table.unique('email');
   });
 };

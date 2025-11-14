@@ -1,5 +1,4 @@
 import { Model } from "@/eloquent/Model";
-import User from './User';
 import Permission from './Permission';
 
 export class Role extends Model {

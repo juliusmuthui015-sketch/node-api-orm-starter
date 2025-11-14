@@ -1,4 +1,4 @@
-import Permission from '@/server/Models/Permission';
+import Permission from '@/server/Models/User/Permission';
 import { ModelAttributes } from '@/eloquent/types';
 
 class PermissionService {

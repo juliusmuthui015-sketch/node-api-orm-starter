@@ -1,6 +1,7 @@
-import User from '@/server/Models/User';
+
 import { ModelAttributes } from '@/eloquent/types';
 import {TRequest} from "@/server/types/types";
+import User from "@/server/Models/User/User";
 
 export class UserService {
   async list(request: TRequest) {

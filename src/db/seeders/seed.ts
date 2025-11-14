@@ -1,8 +1,8 @@
 import bcrypt from 'bcrypt';
 import { initDatabase } from '@/config/db.config';
 import User from "@/server/Models/User";
-import Role from "@/server/Models/Role";
-import Permission from "@/server/Models/Permission";
+import Role from "@/server/Models/User/Role";
+import Permission from "@/server/Models/User/Permission";
 
 export async function seed() {
   await initDatabase();
