@@ -13,6 +13,7 @@ import userRoutes from '@/server/routes/users.routes';
 import roleRoutes from '@/server/routes/roles.routes';
 import permissionRoutes from '@/server/routes/permissions.routes';
 import { asyncContextMiddleware } from './middleware/asyncContext';
+import requestLoggerMiddleware from './middleware/requestLogger';
 
 const app: Application = express();
 
@@ -21,6 +22,7 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+// Note: request logger is mounted inside bootstrap after asyncContextMiddleware
 
 async function autoSyncPermissionsIfEnabled() {
   const flag = String(process.env.SYNC_PERMISSIONS_ON_START || '').toLowerCase();
@@ -49,6 +51,8 @@ async function bootstrap() {
 
     // mount middleware
     app.use(asyncContextMiddleware);
+    // Log incoming requests to the terminal (method, url, status, duration, ip, user)
+    app.use(requestLoggerMiddleware);
 
     // mount routes
     app.use('/api/auth', authRoutes);
