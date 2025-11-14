@@ -15,7 +15,7 @@ export class AuthService {
 
   async login(email: string, password: string) {
 
-    let user = await User.where('email','=',email).with(['roles', 'roles.permissions']).first()
+    let user = await User.where('email','=',email).with(['profile','roles', 'roles.permissions']).first()
     if (!user) return null;
     const ok = await bcrypt.compare(password, user.password || '');
     if (!ok) return null;
@@ -27,7 +27,7 @@ export class AuthService {
   }
 
   async getUserRoles(userId: number|string): Promise<TRole[]> {
-    let user = await User.with(['roles', 'roles.permissions']).find(userId)
+    let user = await User.with(['profile','roles', 'roles.permissions']).find(userId)
     if (!user || !user.toJSON().roles) return []
     return (user?.toJSON()?.roles as TRole[]);
   }

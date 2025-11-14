@@ -16,10 +16,10 @@ export class UserService {
         users.orderBy(query.sort, query.order || 'asc');
       }
 
-      return await users.with(['roles', 'roles.permissions']).paginate(query.limit, query.page);
+      return await users.with(['profile','roles', 'roles.permissions']).paginate(query.limit, query.page);
   }
   async find(id: number|string) {
-      return await User.with(['roles', 'roles.permissions']).findOrFail(id);
+      return await User.with(['profile','roles', 'roles.permissions']).findOrFail(id);
   }
   async create(data: ModelAttributes) {
       let user = User.query();
