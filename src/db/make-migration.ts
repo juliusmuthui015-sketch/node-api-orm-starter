@@ -37,12 +37,70 @@ if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 const fileName = `${timestamp()}_${name.replace(/\s+/g,'_')}.ts`;
 const filePath = path.join(dir, fileName);
 
-let template = '';
+let template: string;
 if (alter && table) {
-  template = `// Migration: ${name}\n// Alter table ${table}\nmodule.exports.up = async function(schema, query) {\n  // Use schema.alterTable to perform ALTER TABLE statements\n  return schema.alterTable('${table}', table => {\n    // add a column:\n    // table.string('nickname', 64).nullable();\n    // add an index (single or composite):\n    // table.index(['nickname', 'other_col']);\n    // add a foreign key:\n    // table.foreignKey('other_id', 'other_table', 'id', { onDelete: 'CASCADE' });\n\n    // drop a column:\n    // table.dropColumn('old_column');\n\n    // rename a column:\n    // table.renameColumn('old_name', 'new_name');\n\n    // change a column (old name, callback that returns new Column definition):\n    // table.changeColumn('age', col => col.integer('age').default(18));\n  });\n};\n\nmodule.exports.down = async function(schema, query) {\n  // Provide reverse operations for rollback if possible. Example: remove added columns or recreate dropped columns.\n  return schema.alterTable('${table}', table => {\n    // reverse operations here\n  });\n};\n`;
+  template = `import Schema, { TableBuilder } from '../Schema';
+
+type QueryFn = (sql: string, params?: any[]) => Promise<any>;
+
+// Migration: ${name}
+// Alter table ${table}
+module.exports.up = async function(schema: Schema, query: QueryFn) {
+  // Use schema.alterTable to perform ALTER TABLE statements
+  return schema.alterTable('${table}', (table: TableBuilder) => {
+    // add a column:
+    // table.string('nickname', 64).nullable();
+    // add an index (single or composite):
+    // table.index(['nickname', 'other_col']);
+    // add a foreign key:
+    // table.foreignKey('other_id', 'other_table', 'id', { onDelete: 'CASCADE' });
+
+    // drop a column:
+    // table.dropColumn('old_column');
+
+    // rename a column:
+    // table.renameColumn('old_name', 'new_name');
+
+    // change a column (old name, callback that returns new Column definition):
+    // table.changeColumn('age', col => col.integer('age').default(18));
+  });
+};
+
+module.exports.down = async function(schema: Schema, query: QueryFn) {
+  // Provide reverse operations for rollback if possible. Example: remove added columns or recreate dropped columns.
+  return schema.alterTable('${table}', (table: TableBuilder) => {
+    // reverse operations here
+  });
+};
+`;
 } else {
   const tbl = table || name.replace(/[^a-z0-9_]/gi, '_').toLowerCase();
-  template = `// Migration: ${name}\nmodule.exports.up = async function(schema, query) {\n  return schema.createTable('${tbl}', table => {\n    table.increments('id');\n    table.string('name', 191).notNullable();\n    table.string('slug', 191).nullable();\n    // composite index example:\n    table.index(['name','slug']);\n    // unique composite index example:\n    table.uniqueIndex(['name','slug'], '${tbl}_name_slug_unique');\n    // foreign key example (if references another table):\n    // table.integer('other_id').notNullable();\n    // table.foreignKey('other_id', 'other_table', 'id', { onDelete: 'CASCADE' });\n    table.timestamps();\n  });\n};\n\nmodule.exports.down = async function(schema, query) {\n  // Drop the table on rollback\n  return schema.dropTable('${tbl}');\n};\n`;
+  template = `import Schema, { TableBuilder } from '../Schema';
+
+type QueryFn = (sql: string, params?: any[]) => Promise<any>;
+
+// Migration: ${name}
+module.exports.up = async function(schema: Schema, query: QueryFn) {
+  return schema.createTable('${tbl}', (table: TableBuilder) => {
+    table.increments('id');
+    table.string('name', 191).notNullable();
+    table.string('slug', 191).nullable();
+    // composite index example:
+    table.index(['name','slug']);
+    // unique composite index example:
+    table.uniqueIndex(['name','slug'], '${tbl}_name_slug_unique');
+    // foreign key example (if references another table):
+    // table.integer('other_id').notNullable();
+    // table.foreignKey('other_id', 'other_table', 'id', { onDelete: 'CASCADE' });
+    table.timestamps();
+  });
+};
+
+module.exports.down = async function(schema: Schema, query: QueryFn) {
+  // Drop the table on rollback
+  return schema.dropTable('${tbl}');
+};
+`;
 }
 
 fs.writeFileSync(filePath, template);
