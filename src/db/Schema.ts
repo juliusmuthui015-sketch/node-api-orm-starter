@@ -17,6 +17,7 @@ export class Column {
   name: string;
   type: string;
   length?: number;
+  enumValues?: string[];
   nullableFlag = false;
   defaultValue?: DefaultValue;
   unsignedFlag = false;
@@ -31,6 +32,9 @@ export class Column {
     this.length = length;
   }
 
+  // set enum values for ENUM columns
+  enum(values: string[]) { this.enumValues = values.slice(); this.type = 'ENUM'; return this; }
+
   nullable() { this.nullableFlag = true; return this; }
   notNullable() { this.nullableFlag = false; return this; }
   default(val: DefaultValue) { this.defaultValue = val; return this; }
@@ -43,7 +47,10 @@ export class Column {
   // toSQL optionally omits the column name when `omitName` is true
   toSQL(omitName = false): string {
     let sqlType = this.type;
-    if (this.length !== undefined && (this.type.toLowerCase() === 'varchar' || this.type.toLowerCase() === 'char')) {
+    if (this.enumValues && this.enumValues.length) {
+      const vals = this.enumValues.map(v => `'${escapeSingle(v)}'`).join(',');
+      sqlType = `ENUM(${vals})`;
+    } else if (this.length !== undefined && (this.type.toLowerCase() === 'varchar' || this.type.toLowerCase() === 'char')) {
       sqlType += `(${this.length})`;
     } else if (this.length !== undefined && (this.type.toLowerCase() === 'int')) {
       sqlType += `(${this.length})`;
@@ -94,6 +101,11 @@ export class TableBuilder {
   // index & foreign key support
   indexes: { columns: string[]; name?: string; unique?: boolean }[] = [];
   foreignKeys: { columns: string[]; refTable: string; refColumns: string[]; name?: string; onDelete?: string; onUpdate?: string }[] = [];
+  // track dropped indexes/foreign keys in alter mode
+  dropIndexes: string[] = [];
+  dropForeignKeys: string[] = [];
+  // index of last added foreign key (for chaining .onDelete/.onUpdate)
+  lastForeignKeyIndex: number | null = null;
 
   // alter-mode specific
   drops: string[] = [];
@@ -109,6 +121,9 @@ export class TableBuilder {
     this.columns.push(col);
     return col;
   }
+
+  // enum helper
+  enum(name: string, values: string[]) { const c = this.column('ENUM', name); c.enum(values); return c; }
 
   increments(name = 'id') { const c = this.column('INT', name); c.increments(); this.primary(name); return c; }
   integer(name: string, length?: number) { return this.column('INT', name, length); }
@@ -140,13 +155,24 @@ export class TableBuilder {
     return this;
   }
 
+  // drop an index in alter mode
+  dropIndex(name: string) { this.dropIndexes.push(name); return this; }
+
+  // drop a foreign key constraint by name in alter mode
+  dropForeignKey(name: string) { this.dropForeignKeys.push(name); return this; }
+
   // foreign key helper: columns (single or array), referenced table and referenced columns
   foreignKey(columns: string[] | string, refTable: string, refColumns: string[] | string, opts: { name?: string, onDelete?: string, onUpdate?: string } = {}) {
     const cols = Array.isArray(columns) ? columns : [columns];
     const refs = Array.isArray(refColumns) ? refColumns : [refColumns];
-    this.foreignKeys.push({ columns: cols, refTable, refColumns: refs, name: opts.name, onDelete: opts.onDelete, onUpdate: opts.onUpdate });
+    const idx = this.foreignKeys.push({ columns: cols, refTable, refColumns: refs, name: opts.name, onDelete: opts.onDelete, onUpdate: opts.onUpdate }) - 1;
+    this.lastForeignKeyIndex = idx;
     return this;
   }
+
+  // chainable helpers to set onDelete/onUpdate for the most recently added foreign key
+  onDelete(action: string) { if (this.lastForeignKeyIndex !== null) { this.foreignKeys[this.lastForeignKeyIndex].onDelete = action; } return this; }
+  onUpdate(action: string) { if (this.lastForeignKeyIndex !== null) { this.foreignKeys[this.lastForeignKeyIndex].onUpdate = action; } return this; }
 
   // alter-mode helpers
   dropColumn(name: string) { this.drops.push(name); return this; }
@@ -199,6 +225,11 @@ export class TableBuilder {
       parts.push(ix.unique ? `ALTER TABLE \`${this.name}\` ADD UNIQUE \`${name}\` (${cols});` : `ALTER TABLE \`${this.name}\` ADD INDEX \`${name}\` (${cols});`);
     }
 
+    // drop indexes in alter mode
+    for (const idxName of this.dropIndexes) {
+      parts.push(`ALTER TABLE \`${this.name}\` DROP INDEX \`${idxName}\`;`);
+    }
+
     // foreign keys in alter mode
     for (const fk of this.foreignKeys) {
       const name = fk.name || `${this.name}_${fk.columns.join('_')}_fk`;
@@ -207,6 +238,11 @@ export class TableBuilder {
       const onDelete = fk.onDelete ? ` ON DELETE ${fk.onDelete}` : '';
       const onUpdate = fk.onUpdate ? ` ON UPDATE ${fk.onUpdate}` : '';
       parts.push(`ALTER TABLE \`${this.name}\` ADD CONSTRAINT \`${name}\` FOREIGN KEY (${cols}) REFERENCES \`${fk.refTable}\` (${refs})${onDelete}${onUpdate};`);
+    }
+
+    // drop foreign keys (by constraint name)
+    for (const fkName of this.dropForeignKeys) {
+      parts.push(`ALTER TABLE \`${this.name}\` DROP FOREIGN KEY \`${fkName}\`;`);
     }
 
     // drops
