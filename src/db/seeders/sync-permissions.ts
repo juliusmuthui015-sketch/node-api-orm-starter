@@ -1,17 +1,29 @@
-import { query, initDatabase } from '../../config/db.config';
+import { initDatabase } from '@/config/db.config';
 import Role from '@/server/Models/User/Role';
 import Permission from '@/server/Models/User/Permission';
 
 interface PermissionDef { slug: string; name: string; description?: string }
 
-// Central permission registry. Extend here to add new permissions.
+// Central permission registry. Keep this in sync with routes' authorizePermissions() calls.
 const PERMISSIONS: PermissionDef[] = [
-  { slug: 'view_users', name: 'View Users' },
-  { slug: 'manage_users', name: 'Manage Users' },
-  { slug: 'view_roles', name: 'View Roles' },
-  { slug: 'manage_roles', name: 'Manage Roles' },
-  { slug: 'view_permissions', name: 'View Permissions' },
-  { slug: 'manage_permissions', name: 'Manage Permissions' }
+  // Users
+  { slug: 'view_users', name: 'View Users', description: 'Can list and view user records' },
+  { slug: 'create_users', name: 'Create Users', description: 'Can create new users' },
+  { slug: 'update_users', name: 'Update Users', description: 'Can update existing users' },
+  { slug: 'delete_users', name: 'Delete Users', description: 'Can delete users' },
+
+  // Roles
+  { slug: 'view_roles', name: 'View Roles', description: 'Can list and view roles' },
+  { slug: 'create_roles', name: 'Create Roles', description: 'Can create roles' },
+  { slug: 'update_roles', name: 'Update Roles', description: 'Can update roles' },
+  { slug: 'delete_roles', name: 'Delete Roles', description: 'Can delete roles' },
+  { slug: 'add_permissions_to_roles', name: 'Add Permissions to Roles', description: 'Can attach/detach permissions for a role' },
+
+  // Permissions
+  { slug: 'view_permissions', name: 'View Permissions', description: 'Can list and view permissions' },
+  { slug: 'create_permissions', name: 'Create Permissions', description: 'Can create new permissions' },
+  { slug: 'update_permissions', name: 'Update Permissions', description: 'Can update permissions' },
+  { slug: 'delete_permissions', name: 'Delete Permissions', description: 'Can delete permissions' }
 ];
 
 async function ensureAdminRole(): Promise<Role> {

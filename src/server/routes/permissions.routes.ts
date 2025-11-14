@@ -6,8 +6,8 @@ const router = Router();
 
 router.get('/', authMiddleware, authorizePermissions('view_permissions'), PermissionController.index);
 router.get('/:id', authMiddleware, authorizePermissions('view_permissions'), PermissionController.show);
-router.post('/', authMiddleware, authorizePermissions('manage_permissions'), PermissionController.store);
-router.put('/:id', authMiddleware, authorizePermissions('manage_permissions'), PermissionController.update);
-router.delete('/:id', authMiddleware, authorizePermissions('manage_permissions'), PermissionController.destroy);
+router.post('/', authMiddleware, authorizePermissions('create_permissions'), PermissionController.store);
+router.put('/:id', authMiddleware, authorizePermissions('update_permissions'), PermissionController.update);
+router.delete('/:id', authMiddleware, authorizePermissions('delete_permissions'), PermissionController.destroy);
 
 export default router;

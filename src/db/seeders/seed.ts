@@ -20,14 +20,26 @@ export async function seed() {
     await Role.create({ name: 'User', slug: 'user', description: 'Regular user', created_at: now, updated_at: now });
   }
 
-  // Permissions: upsert from registry
+  // Permissions: upsert from registry — keep in sync with routes
   const PERMISSIONS: Array<{ slug: string; name: string; description?: string }> = [
-    { slug: 'view_users', name: 'View Users' },
-    { slug: 'manage_users', name: 'Manage Users' },
-    { slug: 'view_roles', name: 'View Roles' },
-    { slug: 'manage_roles', name: 'Manage Roles' },
-    { slug: 'view_permissions', name: 'View Permissions' },
-    { slug: 'manage_permissions', name: 'Manage Permissions' }
+    // Users
+    { slug: 'view_users', name: 'View Users', description: 'Can list and view user records' },
+    { slug: 'create_users', name: 'Create Users', description: 'Can create new users' },
+    { slug: 'update_users', name: 'Update Users', description: 'Can update existing users' },
+    { slug: 'delete_users', name: 'Delete Users', description: 'Can delete users' },
+
+    // Roles
+    { slug: 'view_roles', name: 'View Roles', description: 'Can list and view roles' },
+    { slug: 'create_roles', name: 'Create Roles', description: 'Can create roles' },
+    { slug: 'update_roles', name: 'Update Roles', description: 'Can update roles' },
+    { slug: 'delete_roles', name: 'Delete Roles', description: 'Can delete roles' },
+    { slug: 'add_permissions_to_roles', name: 'Add Permissions to Roles', description: 'Can attach/detach permissions for a role' },
+
+    // Permissions
+    { slug: 'view_permissions', name: 'View Permissions', description: 'Can list and view permissions' },
+    { slug: 'create_permissions', name: 'Create Permissions', description: 'Can create new permissions' },
+    { slug: 'update_permissions', name: 'Update Permissions', description: 'Can update permissions' },
+    { slug: 'delete_permissions', name: 'Delete Permissions', description: 'Can delete permissions' }
   ];
 
   const permIds: number[] = [];
