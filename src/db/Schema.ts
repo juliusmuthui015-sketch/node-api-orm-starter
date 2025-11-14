@@ -106,6 +106,8 @@ export class TableBuilder {
   dropForeignKeys: string[] = [];
   // index of last added foreign key (for chaining .onDelete/.onUpdate)
   lastForeignKeyIndex: number | null = null;
+  // pending foreign being built by fluent .foreign().references().inTable() chain
+  pendingForeign?: { columns: string[]; refTable?: string; refColumns?: string[]; name?: string; onDelete?: string; onUpdate?: string };
 
   // alter-mode specific
   drops: string[] = [];
@@ -120,6 +122,32 @@ export class TableBuilder {
     const col = new Column(name, type, length);
     this.columns.push(col);
     return col;
+  }
+
+  // fluent foreign key builder: table.foreign('col').references('id').inTable('users').onDelete('CASCADE')
+  foreign(columns: string[] | string) {
+    const cols = Array.isArray(columns) ? columns : [columns];
+    this.pendingForeign = { columns: cols };
+    return this;
+  }
+
+  references(refColumns: string[] | string) {
+    if (!this.pendingForeign) this.pendingForeign = { columns: [] };
+    this.pendingForeign.refColumns = Array.isArray(refColumns) ? refColumns : [refColumns];
+    return this;
+  }
+
+  inTable(tableName: string, opts: { name?: string } = {}) {
+    if (!this.pendingForeign) this.pendingForeign = { columns: [] };
+    this.pendingForeign.refTable = tableName;
+    if (opts.name) this.pendingForeign.name = opts.name;
+    // finalize pending foreign into foreignKeys list
+    const pf = this.pendingForeign;
+    const idx = this.foreignKeys.push({ columns: pf.columns, refTable: pf.refTable || '', refColumns: pf.refColumns || ['id'], name: pf.name, onDelete: pf.onDelete, onUpdate: pf.onUpdate }) - 1;
+    this.lastForeignKeyIndex = idx;
+    // clear pending
+    delete this.pendingForeign;
+    return this;
   }
 
   // enum helper
@@ -170,9 +198,23 @@ export class TableBuilder {
     return this;
   }
 
-  // chainable helpers to set onDelete/onUpdate for the most recently added foreign key
-  onDelete(action: string) { if (this.lastForeignKeyIndex !== null) { this.foreignKeys[this.lastForeignKeyIndex].onDelete = action; } return this; }
-  onUpdate(action: string) { if (this.lastForeignKeyIndex !== null) { this.foreignKeys[this.lastForeignKeyIndex].onUpdate = action; } return this; }
+  // chainable helpers to set onDelete/onUpdate for the most recently added or currently pending foreign key
+  onDelete(action: string) {
+    if (this.pendingForeign) {
+      this.pendingForeign.onDelete = action;
+    } else if (this.lastForeignKeyIndex !== null) {
+      this.foreignKeys[this.lastForeignKeyIndex].onDelete = action;
+    }
+    return this;
+  }
+  onUpdate(action: string) {
+    if (this.pendingForeign) {
+      this.pendingForeign.onUpdate = action;
+    } else if (this.lastForeignKeyIndex !== null) {
+      this.foreignKeys[this.lastForeignKeyIndex].onUpdate = action;
+    }
+    return this;
+  }
 
   // alter-mode helpers
   dropColumn(name: string) { this.drops.push(name); return this; }
