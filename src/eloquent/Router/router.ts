@@ -4,6 +4,12 @@ import {resolveMiddleware} from "@/eloquent/Middleware/middleware";
 export type HandlerOrAlias = RequestHandler | string | Array<RequestHandler | string>;
 export type GroupOptions = { prefix?: string; middleware?: RequestHandler | RequestHandler[] | string | string[] };
 
+// Fluent prefix return type for stronger typing
+export type PrefixFluent = {
+  middleware(mw: RequestHandler | RequestHandler[] | string | string[], cb?: (rb: RouterBuilder) => void): RouterBuilder | { group(cb: (rb: RouterBuilder) => void): RouterBuilder };
+  group(cb: (rb: RouterBuilder) => void): RouterBuilder;
+};
+
 export class RouterBuilder {
   private router: Router;
   private prefixStack: string[] = [''];
@@ -29,7 +35,18 @@ export class RouterBuilder {
     return this.middlewareStack.reduce<RequestHandler[]>((acc, cur) => acc.concat(cur || []), []);
   }
 
-  group(options: GroupOptions, cb: (rb: RouterBuilder) => void) {
+  // Accept either group(cb) or group(options, cb)
+  group(optionsOrCb: GroupOptions | ((rb: RouterBuilder) => void), cb?: (rb: RouterBuilder) => void): void {
+    let options: GroupOptions = {};
+    let callback: (rb: RouterBuilder) => void;
+    if (typeof optionsOrCb === 'function') {
+      callback = optionsOrCb as (rb: RouterBuilder) => void;
+    } else {
+      options = optionsOrCb || {} as GroupOptions;
+      if (!cb) throw new Error('group(options, cb) requires a callback');
+      callback = cb as (rb: RouterBuilder) => void;
+    }
+
     const prefix = options.prefix || '';
     const raw = options.middleware ? (Array.isArray(options.middleware) ? options.middleware : [options.middleware]) : [] as any[];
     // resolve middleware strings to request handlers and flatten arrays
@@ -42,7 +59,7 @@ export class RouterBuilder {
     this.prefixStack.push(prefix);
     this.middlewareStack.push(mw);
     try {
-      cb(this);
+      callback(this);
     } finally {
       this.prefixStack.pop();
       this.middlewareStack.pop();
@@ -79,6 +96,46 @@ export class RouterBuilder {
     this.put(`/${name}/:id`, controller.update);
     this.patch(`/${name}/:id`, controller.update);
     this.delete(`/${name}/:id`, controller.destroy || controller.delete);
+  }
+
+  // Fluent helpers: provide a typed fluent object for prefix chaining
+  prefix(prefix: string): PrefixFluent {
+    const self = this;
+    return {
+      middleware(mw: RequestHandler | RequestHandler[] | string | string[], cb?: (rb: RouterBuilder) => void) {
+        if (cb) {
+          self.group({ prefix, middleware: mw as any }, cb);
+          return self;
+        }
+        return {
+          group(cb2: (rb: RouterBuilder) => void) {
+            self.group({ prefix, middleware: mw as any }, cb2);
+            return self;
+          }
+        } as any;
+      },
+      group(cb: (rb: RouterBuilder) => void) {
+        self.group({ prefix }, cb);
+        return self;
+      }
+    };
+  }
+
+  // Overloads for middleware chaining
+  middleware(mw: RequestHandler | RequestHandler[] | string | string[], cb: (rb: RouterBuilder) => void): RouterBuilder;
+  middleware(mw: RequestHandler | RequestHandler[] | string | string[]): { group(cb: (rb: RouterBuilder) => void): RouterBuilder };
+  middleware(mw: RequestHandler | RequestHandler[] | string | string[], cb?: (rb: RouterBuilder) => void) {
+    if (cb) {
+      this.group({ middleware: mw as any }, cb);
+      return this;
+    }
+    const self = this;
+    return {
+      group(cb2: (rb: RouterBuilder) => void) {
+        self.group({ middleware: mw as any }, cb2);
+        return self;
+      }
+    } as any;
   }
 
   build(): Router {

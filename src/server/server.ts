@@ -8,10 +8,10 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // Import database after loading env so top-level DB config reads the populated process.env
 import { initDatabase, query as _dbQuery } from "@/config/db.config";
+import '@/server/Providers/providers';
 import apiRouter from '@/server/routes';
 import { asyncContextMiddleware } from './middleware/asyncContext';
 import requestLoggerMiddleware from './middleware/requestLogger';
-import '@/server/Providers/providers';
 
 const app: Application = express();
 

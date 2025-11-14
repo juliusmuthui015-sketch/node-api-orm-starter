@@ -1,4 +1,3 @@
-
 import AuthController from '@/server/controllers/AuthController';
 import UserController from '@/server/controllers/UserController';
 import RoleController from '@/server/controllers/RoleController';
@@ -10,13 +9,13 @@ import RouterBuilder from "@/eloquent/Router/router";
 const rb = new RouterBuilder();
 const UC: any = UserController;
 
-rb.group({ prefix: '/api' }, (api: RouterBuilder) => {
-  api.group({ prefix: '/auth' }, (g: RouterBuilder) => {
+rb.prefix('/api').group((api: RouterBuilder) => {
+  api.prefix('/auth').group((g: RouterBuilder) => {
     g.post('/register', AuthController.register);
     g.post('/login', AuthController.login);
   });
 
-  api.group({ prefix: '/users', middleware: 'auth' }, (g: RouterBuilder) => {
+  api.prefix('/users').middleware('auth').group((g: RouterBuilder) => {
     g.get('/', 'can:view_users', UserController.index);
     g.get('/:id', 'can:view_users', UserController.show);
     g.get('/:id/profile', 'can:view_users', UC.showProfile);
@@ -28,7 +27,7 @@ rb.group({ prefix: '/api' }, (api: RouterBuilder) => {
     g.delete('/:id', 'can:delete_users', UC.destroy);
   });
 
-  api.group({ prefix: '/roles', middleware: 'auth' }, (g: RouterBuilder) => {
+  api.prefix('/roles').middleware('auth').group((g: RouterBuilder) => {
     g.get('/', 'can:view_roles', RoleController.index);
     g.get('/:id', 'can:view_roles', RoleController.show);
     g.post('/', 'can:create_roles', RoleController.store);
@@ -37,7 +36,7 @@ rb.group({ prefix: '/api' }, (api: RouterBuilder) => {
     g.post('/:id/permissions', 'can:add_permissions_to_roles', RoleController.syncPermissions);
   });
 
-  api.group({ prefix: '/permissions', middleware: 'auth' }, (g: RouterBuilder) => {
+  api.prefix('/permissions').middleware('auth').group((g: RouterBuilder) => {
     g.get('/', 'can:view_permissions', PermissionController.index);
     g.get('/:id', 'can:view_permissions', PermissionController.show);
     g.post('/', 'can:create_permissions', PermissionController.store);
