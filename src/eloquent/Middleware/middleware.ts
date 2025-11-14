@@ -1,0 +1,29 @@
+
+import {RequestHandler} from "express";
+
+type MiddlewareEntry = RequestHandler | ((...args: any[]) => RequestHandler);
+
+const registry: Record<string, MiddlewareEntry> = {};
+
+export function registerMiddleware(name: string, entry: MiddlewareEntry) {
+    registry[name] = entry;
+}
+
+export function resolveMiddleware(mw: string | RequestHandler | (RequestHandler | string)[]): RequestHandler | RequestHandler[] {
+    if (typeof mw === 'function') return mw;
+    if (Array.isArray(mw)) return mw.map(m => resolveMiddleware(m) as RequestHandler);
+
+    // string -> maybe 'auth' or 'can:view_users' or 'role:admin'
+    const [key, rest] = (mw as string).split(':');
+    if (rest !== undefined && rest.split(',').length > 0) {
+        const args = rest ? rest.split(',').map(s => s.trim()) : [];
+        const factory = registry[key] as any;
+        if (!factory) throw new Error(`Unknown middleware factory: ${key}`);
+        return factory(...args);
+    }
+
+    const found = registry[mw as string];
+    if (found) return (found as RequestHandler);
+
+    throw new Error(`Unknown middleware: ${String(mw)}`);
+}
