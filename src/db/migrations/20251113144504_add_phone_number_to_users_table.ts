@@ -1,5 +1,5 @@
 import Schema, { TableBuilder } from '../Schema';
-import User from "@/server/Models/User";
+import User from "@/server/Models/User/User";
 
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 

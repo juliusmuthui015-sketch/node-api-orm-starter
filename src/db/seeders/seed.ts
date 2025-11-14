@@ -1,8 +1,8 @@
 import bcrypt from 'bcrypt';
 import { initDatabase } from '@/config/db.config';
-import User from "@/server/Models/User";
 import Role from "@/server/Models/User/Role";
 import Permission from "@/server/Models/User/Permission";
+import User from "@/server/Models/User/User";
 
 export async function seed() {
   await initDatabase();
@@ -45,12 +45,14 @@ export async function seed() {
   let admin = await User.where('email', 'admin@example.com').first();
   if (!admin) {
     admin = await User.create({ name: 'Admin', email: 'admin@example.com', password: await bcrypt.hash('password', 10), active_status: 1, created_at: now, updated_at: now });
+    await admin.profile().create({ user_id: admin.id as number, gender: 'male', type: 'admin', created_at: now, updated_at: now });
   }
 
   // Ensure regular user exists
-  const existingUser = await User.where('email', 'user@example.com').first();
+  let existingUser = await User.where('email', 'user@example.com').first();
   if (!existingUser) {
-    await User.create({ name: 'User', email: 'user@example.com', password: await bcrypt.hash('password', 10), active_status: 1, created_at: now, updated_at: now });
+    existingUser = await User.create({ name: 'User', email: 'user@example.com', password: await bcrypt.hash('password', 10), active_status: 1, created_at: now, updated_at: now });
+    await existingUser.profile().create({ user_id: existingUser.id as number, gender: 'male', type: 'user', created_at: now, updated_at: now });
   }
 
   // Attach admin role to admin user

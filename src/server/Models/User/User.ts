@@ -1,5 +1,6 @@
 import {Model} from "@/eloquent/Model";
 import Role from './Role';
+import UserProfile from "@/server/Models/User/UserProfile";
 
 export class User extends Model {
     // static table = 'users';
@@ -31,6 +32,10 @@ export class User extends Model {
 
     roles(){
         return this.belongsToMany(Role, 'roles_users', 'users_id', 'roles_id')
+    }
+
+    profile(){
+        return this.hasOne(UserProfile, 'user_id', 'id');
     }
     // defaults for new instances
     constructor(attributes: any = {}) {
