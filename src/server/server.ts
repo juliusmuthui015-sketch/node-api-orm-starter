@@ -8,12 +8,10 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // Import database after loading env so top-level DB config reads the populated process.env
 import { initDatabase, query as _dbQuery } from "@/config/db.config";
-import authRoutes from '@/server/routes/auth.routes';
-import userRoutes from '@/server/routes/users.routes';
-import roleRoutes from '@/server/routes/roles.routes';
-import permissionRoutes from '@/server/routes/permissions.routes';
+import apiRouter from '@/server/routes';
 import { asyncContextMiddleware } from './middleware/asyncContext';
 import requestLoggerMiddleware from './middleware/requestLogger';
+import '@/server/Providers/providers';
 
 const app: Application = express();
 
@@ -54,11 +52,8 @@ async function bootstrap() {
     // Log incoming requests to the terminal (method, url, status, duration, ip, user)
     app.use(requestLoggerMiddleware);
 
-    // mount routes
-    app.use('/api/auth', authRoutes);
-    app.use('/api/users', userRoutes);
-    app.use('/api/roles', roleRoutes);
-    app.use('/api/permissions', permissionRoutes);
+    // mount consolidated Laravel-style routes
+    app.use(apiRouter);
 
     // Optional migration lock monitoring endpoint
     const enableLockEndpoint = String(process.env.ENABLE_MIGRATION_LOCK_ENDPOINT || '').toLowerCase();
