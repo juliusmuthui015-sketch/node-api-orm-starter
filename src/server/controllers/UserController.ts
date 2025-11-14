@@ -64,7 +64,7 @@ export default {
     const requester = (req as any).user;
     if (!requester) return res.status(401).json({ message: 'Unauthorized' });
     const isOwner = String(requester.id) === String(req.params.id);
-    const hasManage = (requester.permissions || []).includes('manage_users');
+    const hasManage = (requester.permissions || []).includes('update_users');
     if (!isOwner && !hasManage) return res.status(403).json({ message: 'Forbidden' });
     const hashed = await bcrypt.hash(password, 10);
     const user = await userService.setPassword(req.params.id, hashed);

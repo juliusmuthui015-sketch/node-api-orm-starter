@@ -7,7 +7,7 @@ import RouterBuilder from "@/eloquent/Router/router";
 // Use middleware aliases (strings) resolved by middlewareConfig via RouterBuilder
 
 const rb = new RouterBuilder();
-const UC: any = UserController;
+const UC = UserController;
 
 rb.prefix('/api').group((api: RouterBuilder) => {
   api.prefix('/auth').group((g: RouterBuilder) => {
@@ -39,9 +39,6 @@ rb.prefix('/api').group((api: RouterBuilder) => {
   api.prefix('/permissions').middleware('auth').group((g: RouterBuilder) => {
     g.get('/', 'can:view_permissions', PermissionController.index);
     g.get('/:id', 'can:view_permissions', PermissionController.show);
-    g.post('/', 'can:create_permissions', PermissionController.store);
-    g.put('/:id', 'can:update_permissions', PermissionController.update);
-    g.delete('/:id', 'can:delete_permissions', PermissionController.destroy);
   });
 });
 
