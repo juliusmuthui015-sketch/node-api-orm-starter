@@ -49,6 +49,9 @@ async function run() {
 
   try {
     console.log('Collecting tables to drop...');
+    // disable foreign key checks to allow dropping tables in any order
+    try { await query('SET FOREIGN_KEY_CHECKS = 0'); } catch (_) {}
+
     const rows: any[] = await query("SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type='BASE TABLE'");
     const names = rows.map(r => r.table_name).filter(Boolean);
     if (!names.length) console.log('No tables found in database.');
@@ -62,6 +65,9 @@ async function run() {
         }
       }
     }
+
+    // re-enable foreign key checks after dropping
+    try { await query('SET FOREIGN_KEY_CHECKS = 1'); } catch (_) {}
 
     // release lock before running migrations runner which will re-acquire lock
     try { await query('SELECT RELEASE_LOCK(?)', [lockName]); } catch (_) {}
@@ -91,6 +97,8 @@ async function run() {
     console.log('migrate:fresh complete');
   } finally {
     try { await query('SELECT RELEASE_LOCK(?)', [lockName]); } catch (_) {}
+    // ensure foreign key checks are enabled
+    try { await query('SET FOREIGN_KEY_CHECKS = 1'); } catch (_) {}
   }
 }
 
@@ -99,4 +107,3 @@ if (require.main === module) {
 }
 
 module.exports = run;
-
