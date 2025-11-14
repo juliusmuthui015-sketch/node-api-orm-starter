@@ -3,6 +3,7 @@ import { initDatabase } from '@/config/db.config';
 import Role from "@/server/Models/User/Role";
 import Permission from "@/server/Models/User/Permission";
 import User from "@/server/Models/User/User";
+import {EUserType} from "@/server/enums";
 
 export async function seed() {
   await initDatabase();
@@ -52,7 +53,7 @@ export async function seed() {
   let existingUser = await User.where('email', 'user@example.com').first();
   if (!existingUser) {
     existingUser = await User.create({ name: 'User', email: 'user@example.com', password: await bcrypt.hash('password', 10), active_status: 1, created_at: now, updated_at: now });
-    await existingUser.profile().create({ user_id: existingUser.id as number, gender: 'male', type: 'user', created_at: now, updated_at: now });
+    await existingUser.profile().create({ user_id: existingUser.id as number, gender: 'male', type: EUserType.TENANT, created_at: now, updated_at: now });
   }
 
   // Attach admin role to admin user
