@@ -788,7 +788,7 @@ export class EloquentBuilder<T extends Model> {
         }
 
         const rows = await dbQuery<any>(sql, params);
-        const grouped = new Map<any, any[]>();
+        const grouped = new Map<any, any>();
         rows.forEach(r => {
             const k = r[foreignKey];
             if (!grouped.has(k)) grouped.set(k, []);
@@ -797,7 +797,7 @@ export class EloquentBuilder<T extends Model> {
 
         models.forEach(m => {
             const key = (m as any).getAttribute(localKey);
-            const list = (grouped.get(key) || []).map(row => {
+            const list = (grouped.get(key) || []).map((row: any) => {
                 const inst = new (relatedModel as any)();
                 inst.hydrate(row);
                 return inst;
@@ -853,58 +853,70 @@ export class EloquentBuilder<T extends Model> {
         const parentPK = (this.model as any).primaryKey || 'id';
         const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
         const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
-        const parentIds = Array.from(new Set(models.map(m => (m as any).getAttribute(parentPK)).filter((v: any) => v !== undefined && v !== null)));
-
-        if (!parentIds.length) {
-            models.forEach(m => this.setRelation(m, relation, []));
-            return;
-        }
-
-        const parentPlaceholders = parentIds.map(() => '?').join(',');
-
-        // Fetch pivot rows
-        let pivotSql = `SELECT ${foreignPivotKey} as parent_id, ${relatedPivotKey} as related_id FROM ${pivotTable} WHERE ${foreignPivotKey} IN (${parentPlaceholders})`;
-        const pivotParams = [...parentIds];
-
-        // Apply pivot constraints if provided
-        if (options.constraints) {
-            const constraintBuilder = new EloquentBuilder(relatedModel);
-            options.constraints(constraintBuilder);
-            const constraintWhere = constraintBuilder.buildWhereClause();
-            if (constraintWhere.sql) {
-                pivotSql += constraintWhere.sql.replace('WHERE', 'AND');
-                pivotParams.push(...constraintWhere.params);
+        const parentRaw = models.map(m => (m as any).getAttribute(parentPK)).filter((v: any) => v !== undefined && v !== null);
+        if (!parentRaw.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        const parentMatch = parentPK === 'id' ? Array.from(new Set(parentRaw.flatMap(v => this.expandIdForms(v)))) : Array.from(new Set(parentRaw));
+        const pc = mongoCollection(pivotTable);
+        const pivots = await pc.find({ [foreignPivotKey]: { $in: parentMatch } }).toArray();
+        if (!pivots.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        // Gather related ids, allow string/number forms
+        const relatedTokens = Array.from(new Set(pivots.map((p: any) => String(p[relatedPivotKey]))));
+        const rc = mongoCollection(relatedTable);
+        let rows: any[] = [];
+        if (relatedPK === 'id') {
+            const oidList: ObjectId[] = [];
+            const shortTokens: string[] = [];
+            relatedTokens.forEach(s => {
+                if (/^[0-9a-fA-F]{24}$/.test(s)) { try { oidList.push(new ObjectId(s)); } catch {} }
+                if (/^[0-9a-fA-F]{1,8}$/.test(s)) { shortTokens.push(s); }
+            });
+            const or: any[] = [];
+            if (oidList.length) or.push({ _id: { $in: oidList } });
+            if (shortTokens.length) {
+                const tokenSet = Array.from(new Set(shortTokens));
+                const prefixExprs = tokenSet.map(t => ({ $expr: { $eq: [ { $substrBytes: [ { $toString: '$_id' }, 0, t.length ] }, t ] } }));
+                or.push(...prefixExprs);
             }
+            rows = await rc.find(or.length ? { $or: or } : {}).toArray();
+        } else {
+            rows = await rc.find({ [relatedPK]: { $in: relatedTokens } as any }).toArray();
         }
-
-        const pivotRows = await dbQuery<any>(pivotSql, pivotParams);
-
-        if (!pivotRows.length) {
-            models.forEach(m => this.setRelation(m, relation, []));
-            return;
-        }
-
-        const relatedIds = Array.from(new Set(pivotRows.map((r: any) => r.related_id)));
-        const relatedPlaceholders = relatedIds.map(() => '?').join(',');
-        const relatedRows = await dbQuery<any>(`SELECT * FROM ${relatedTable} WHERE ${relatedPK} IN (${relatedPlaceholders})`, relatedIds);
-
-        const relatedMap = new Map<any, any>();
-        relatedRows.forEach(r => relatedMap.set(r[relatedPK], r));
-
+        const rmap = new Map<any, any>();
+        rows.forEach(r => {
+            if (r && r._id && !('id' in r)) r.id = String(r._id);
+            const idStr = String(r._id);
+            const token = idStr.slice(0,8);
+            rmap.set(idStr, r);
+            rmap.set(token, r);
+        });
         const grouped = new Map<any, any[]>();
-        pivotRows.forEach((p: any) => {
-            const relRow = relatedMap.get(p.related_id);
-            if (!grouped.has(p.parent_id)) grouped.set(p.parent_id, []);
+        pivots.forEach((p: any) => {
+            const pidVal = p[foreignPivotKey];
+            const pidStr = String(pidVal);
+            const ridStr = String(p[relatedPivotKey]);
+            const relRow = rmap.get(ridStr) || rmap.get(String(ridStr));
             if (relRow) {
-                const inst = new (relatedModel as any)();
-                inst.hydrate(relRow);
-                grouped.get(p.parent_id)!.push(inst);
+                if (!grouped.has(pidVal)) grouped.set(pidVal, []);
+                grouped.get(pidVal)!.push(relRow);
+                // also index by string form of parent id for lookup flexibility
+                if (!grouped.has(pidStr)) grouped.set(pidStr, []);
+                grouped.get(pidStr)!.push(relRow);
             }
         });
-
         models.forEach(m => {
             const pid = (m as any).getAttribute(parentPK);
-            const list = grouped.get(pid) || [];
+            const forms = parentPK === 'id' ? this.expandIdForms(pid) : [pid];
+            const seen = new Set<string>();
+            const collected: any[] = [];
+            forms.forEach(f => {
+                const fStr = String(f);
+                const arr = grouped.get(f) || grouped.get(fStr) || [];
+                for (const r of arr) {
+                    const sid = r._id ? String(r._id) : JSON.stringify(r);
+                    if (!seen.has(sid)) { seen.add(sid); collected.push(r); }
+                }
+            });
+            const list = collected.map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row); return inst; });
             this.setRelation(m, relation, list);
         });
     }
@@ -986,6 +998,50 @@ export class EloquentBuilder<T extends Model> {
         try { return new ObjectId(String(val)); } catch { return val; }
     }
 
+    // NEW: detect *_id like fields (including primary id)
+    private isIdLikeField(field: string): boolean {
+        const f = this.normalizeField(field);
+        return f === '_id' || /_id$/i.test(f);
+    }
+
+    // NEW: coerce values to ObjectId when targeting *_id fields
+    private coerceForField(field: string, val: any): any {
+        if (val === null || val === undefined) return val;
+        if (!this.isIdLikeField(field)) return val;
+        if (val instanceof ObjectId) return val;
+        const s = String(val);
+        if (/^[0-9a-fA-F]{24}$/.test(s)) {
+            try { return new ObjectId(s); } catch { return val; }
+        }
+        return val;
+    }
+
+    // Expand possible stored forms for an id-like value used in non-_id fields
+    // e.g., '69199330e91394e0bc375674' -> ['69199330e91394e0bc375674', ObjectId(...), '69199330', 69199330]
+    private expandIdForms(val: any): any[] {
+        const out: any[] = [];
+        const s = String(val);
+        // original
+        out.push(val);
+        // string
+        out.push(s);
+        // numeric if digits
+        if (/^\d+$/.test(s)) {
+            const n = Number(s);
+            if (!Number.isNaN(n)) out.push(n);
+        }
+        // objectId
+        try { out.push(new ObjectId(s)); } catch {/*noop*/}
+        // first8 from 24-hex
+        if (/^[0-9a-fA-F]{24}$/.test(s)) {
+            const first8 = s.slice(0, 8);
+            out.push(first8);
+            const n2 = Number(first8);
+            if (!Number.isNaN(n2)) out.push(n2);
+        }
+        return Array.from(new Set(out));
+    }
+
     private buildMongoFilter(): any {
         if (!this.whereClauses.length) return {};
         const andParts: any[] = [];
@@ -1001,7 +1057,7 @@ export class EloquentBuilder<T extends Model> {
                 return nestedBuilder.buildMongoFilter();
             }
             if (Array.isArray(w.value) && (op === 'in' || op === 'not in')) {
-                const arr = w.value.map(v => col === '_id' ? this.coerceId(v) : v);
+                const arr = w.value.map(v => this.isIdLikeField(w.column) ? this.coerceForField(w.column, v) : (col === '_id' ? this.coerceId(v) : v));
                 return { [col]: op === 'in' ? { $in: arr } : { $nin: arr } };
             }
             if (Array.isArray(w.value) && (op === 'between' || op === 'not between')) {
@@ -1014,8 +1070,7 @@ export class EloquentBuilder<T extends Model> {
                 if (op === '!=' || op === '<>') return { [col]: { $ne: null } };
             }
             // simple ops
-            let v = w.value;
-            if (col === '_id') v = this.coerceId(v);
+            let v = this.isIdLikeField(w.column) ? this.coerceForField(w.column, w.value) : (col === '_id' ? this.coerceId(w.value) : w.value);
             switch (op) {
                 case '=': return { [col]: v };
                 case '!=':
@@ -1077,11 +1132,11 @@ export class EloquentBuilder<T extends Model> {
                 } else if (v && typeof v === 'object' && (v as any).$dec !== undefined) {
                     updateDoc.$inc = updateDoc.$inc || {}; (updateDoc.$inc as any)[this.normalizeField(k)] = -((v as any).$dec);
                 } else {
-                    updateDoc.$set = updateDoc.$set || {}; (updateDoc.$set as any)[this.normalizeField(k)] = v;
+                    updateDoc.$set = updateDoc.$set || {}; (updateDoc.$set as any)[this.normalizeField(k)] = this.coerceForField(k, v as any);
                 }
             }
         } else {
-            updateDoc = { $set: Object.fromEntries(Object.entries(values).map(([k,v]) => [this.normalizeField(k), v])) };
+            updateDoc = { $set: Object.fromEntries(Object.entries(values).map(([k,v]) => [this.normalizeField(k), this.coerceForField(k, v)])) };
         }
         const res = await c.updateMany(filter, updateDoc);
         return Number(res.modifiedCount || 0);
@@ -1109,6 +1164,18 @@ export class EloquentBuilder<T extends Model> {
                 try { d._id = new ObjectId(String(d.id)); } catch { d._id = d.id; }
                 delete d.id;
             }
+            // normalize any *_id fields to ObjectId when possible
+            Object.keys(d).forEach(k => {
+                if (/_id$/i.test(k) && d[k] !== undefined && d[k] !== null) {
+                    const v = d[k];
+                    if (!(v instanceof ObjectId)) {
+                        const s = String(v);
+                        if (/^[0-9a-fA-F]{24}$/.test(s)) {
+                            try { d[k] = new ObjectId(s); } catch { /* ignore */ }
+                        }
+                    }
+                }
+            });
             return d;
         });
         const res = await c.insertMany(docs);
@@ -1140,16 +1207,23 @@ export class EloquentBuilder<T extends Model> {
     private async loadHasOneMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
         const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
-        const localIds = Array.from(new Set(models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined)));
-        if (!localIds.length) return;
+        const localsRaw = models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined && v !== null);
+        if (!localsRaw.length) return;
+        let matchVals: any[] = Array.from(new Set(localsRaw));
+        // If comparing id to non-_id foreign key, expand forms to handle first8/number cases
+        if (localKey === 'id') {
+            matchVals = Array.from(new Set(localsRaw.flatMap(v => this.expandIdForms(v))));
+        }
         const c = mongoCollection(relatedTable);
-        const filter: any = { [foreignKey]: { $in: localIds } };
-        const rows = await c.find(filter).toArray();
+        const rows = await c.find({ [foreignKey]: { $in: matchVals } }).toArray();
         const byFK = new Map<any, any>();
         rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); byFK.set(r[foreignKey], r); });
+        // Also map stringified values for robustness
+        rows.forEach(r => { byFK.set(String(r[foreignKey]), r); });
         models.forEach(m => {
             const key = (m as any).getAttribute(localKey);
-            const row = byFK.get(key) || null;
+            const candidates = this.expandIdForms(key).map(v => byFK.get(v) || byFK.get(String(v)) ).filter(Boolean);
+            const row = candidates[0] || null;
             if (row) {
                 const inst = new (relatedModel as any)();
                 inst.hydrate(row);
@@ -1161,15 +1235,30 @@ export class EloquentBuilder<T extends Model> {
     private async loadHasManyMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
         const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
-        const localIds = Array.from(new Set(models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined)));
-        if (!localIds.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        const localsRaw = models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined && v !== null);
+        if (!localsRaw.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        let matchVals: any[] = Array.from(new Set(localsRaw));
+        if (localKey === 'id') matchVals = Array.from(new Set(localsRaw.flatMap(v => this.expandIdForms(v))));
         const c = mongoCollection(relatedTable);
-        const rows = await c.find({ [foreignKey]: { $in: localIds } }).toArray();
-        const grouped = new Map<any, any[]>();
-        rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); const k = r[foreignKey]; if (!grouped.has(k)) grouped.set(k, []); grouped.get(k)!.push(r); });
+        const rows = await c.find({ [foreignKey]: { $in: matchVals } }).toArray();
+        const grouped = new Map<any, any>();
+        rows.forEach(r => {
+            if (r && r._id && !('id' in r)) r.id = String(r._id);
+            const k = r[foreignKey];
+            if (!grouped.has(k)) grouped.set(k, []);
+            grouped.get(k)!.push(r);
+            // also index by string key
+            const ks = String(k);
+            if (!grouped.has(ks)) grouped.set(ks, []);
+            grouped.get(ks)!.push(r);
+        });
         models.forEach(m => {
             const key = (m as any).getAttribute(localKey);
-            const list = (grouped.get(key) || []).map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row); return inst; });
+            const keys = this.expandIdForms(key).map(v => String(v));
+            const acc: any[] = [];
+            keys.forEach(k => { const arr = grouped.get(k) || grouped.get(key) || []; if (arr.length) acc.push(...arr); });
+            const uniq = Array.from(new Set(acc.map(x => x._id ? String(x._id) : JSON.stringify(x)))).map(id => acc.find(x => (x._id ? String(x._id) : JSON.stringify(x)) === id));
+            const list = uniq.map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row!); return inst; });
             this.setRelation(m, relation, list);
         });
     }
@@ -1177,15 +1266,40 @@ export class EloquentBuilder<T extends Model> {
     private async loadBelongsToMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const foreignKey = rel.foreignKey || `${relation}_id`;
         const ownerKey = rel.ownerKey || relatedPK || 'id';
-        const foreignIds = Array.from(new Set(models.map(m => (m as any).getAttribute(foreignKey)).filter((v: any) => v !== undefined && v !== null)));
-        if (!foreignIds.length) { models.forEach(m => this.setRelation(m, relation, null)); return; }
+        const foreignIdsRaw = models.map(m => (m as any).getAttribute(foreignKey)).filter((v: any) => v !== undefined && v !== null);
+        if (!foreignIdsRaw.length) { models.forEach(m => this.setRelation(m, relation, null)); return; }
         const c = mongoCollection(relatedTable);
-        const rows = await c.find({ [ownerKey === 'id' ? '_id' : ownerKey]: ownerKey === 'id' ? { $in: foreignIds.map(v => this.coerceId(v)) } : { $in: foreignIds } }).toArray();
+        let rows: any[] = [];
+        if (ownerKey === 'id') {
+            // Separate clearly valid ObjectIds and short ids (first8 digits stored)
+            const asStrings = foreignIdsRaw.map((v: any) => String(v));
+            const oidList: ObjectId[] = [];
+            const shortTokens: string[] = [];
+            asStrings.forEach(s => {
+                if (/^[0-9a-fA-F]{24}$/.test(s)) { try { oidList.push(new ObjectId(s)); } catch {} }
+                // accept any token length up to 8 for prefix match
+                if (/^[0-9a-fA-F]{1,8}$/.test(s)) { shortTokens.push(s); }
+            });
+            const or: any[] = [];
+            if (oidList.length) or.push({ _id: { $in: oidList } });
+            if (shortTokens.length) {
+                const tokenSet = Array.from(new Set(shortTokens));
+                const prefixExprs = tokenSet.map(t => ({ $expr: { $eq: [ { $substrBytes: [ { $toString: '$_id' }, 0, t.length ] }, t ] } }));
+                or.push(...prefixExprs);
+            }
+            rows = await c.find(or.length ? { $or: or } : {}).toArray();
+        } else {
+            const ids = Array.from(new Set(foreignIdsRaw));
+            rows = await c.find({ [ownerKey]: { $in: ids } as any }).toArray();
+        }
         const map = new Map<any, any>();
-        rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); map.set(ownerKey === 'id' ? String(r._id) : r[ownerKey], r); });
+        rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); map.set(String(r._id), r); });
+        // also map by first8 token to support numeric/digit matching
+        rows.forEach(r => { const token = String(r._id).slice(0,8); map.set(token, r); });
         models.forEach(m => {
             const fk = (m as any).getAttribute(foreignKey);
-            const row = map.get(ownerKey === 'id' ? String(fk) : fk) || null;
+            const candidates = this.expandIdForms(fk).map(v => map.get(String(v))).filter(Boolean);
+            const row = candidates[0] || null;
             if (row) { const inst = new (relatedModel as any)(); inst.hydrate(row); this.setRelation(m, relation, inst); }
             else this.setRelation(m, relation, null);
         });
@@ -1196,35 +1310,89 @@ export class EloquentBuilder<T extends Model> {
         const parentPK = (this.model as any).primaryKey || 'id';
         const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
         const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
-        const parentIds = Array.from(new Set(models.map(m => (m as any).getAttribute(parentPK)).filter((v: any) => v !== undefined && v !== null)));
-        if (!parentIds.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        const parentRaw = models.map(m => (m as any).getAttribute(parentPK)).filter((v: any) => v !== undefined && v !== null);
+        if (!parentRaw.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        const parentMatch = parentPK === 'id' ? Array.from(new Set(parentRaw.flatMap(v => this.expandIdForms(v)))) : Array.from(new Set(parentRaw));
         const pc = mongoCollection(pivotTable);
-        const pivots = await pc.find({ [foreignPivotKey]: { $in: parentIds } }).toArray();
-        const relatedIds = Array.from(new Set(pivots.map((p: any) => p[relatedPivotKey])));
-        if (!relatedIds.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        const pivots = await pc.find({ [foreignPivotKey]: { $in: parentMatch } }).toArray();
+        if (!pivots.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        // Gather related ids, allow string/number forms
+        const relatedTokens = Array.from(new Set(pivots.map((p: any) => String(p[relatedPivotKey]))));
         const rc = mongoCollection(relatedTable);
-        const rows = await rc.find({ [relatedPK === 'id' ? '_id' : relatedPK]: relatedPK === 'id' ? { $in: relatedIds.map(v => this.coerceId(v)) } : { $in: relatedIds } }).toArray();
+        let rows: any[] = [];
+        if (relatedPK === 'id') {
+            const oidList: ObjectId[] = [];
+            const shortTokens: string[] = [];
+            relatedTokens.forEach(s => {
+                if (/^[0-9a-fA-F]{24}$/.test(s)) { try { oidList.push(new ObjectId(s)); } catch {} }
+                if (/^[0-9a-fA-F]{1,8}$/.test(s)) { shortTokens.push(s); }
+            });
+            const or: any[] = [];
+            if (oidList.length) or.push({ _id: { $in: oidList } });
+            if (shortTokens.length) {
+                const tokenSet = Array.from(new Set(shortTokens));
+                const prefixExprs = tokenSet.map(t => ({ $expr: { $eq: [ { $substrBytes: [ { $toString: '$_id' }, 0, t.length ] }, t ] } }));
+                or.push(...prefixExprs);
+            }
+            rows = await rc.find(or.length ? { $or: or } : {}).toArray();
+        } else {
+            rows = await rc.find({ [relatedPK]: { $in: relatedTokens } as any }).toArray();
+        }
         const rmap = new Map<any, any>();
-        rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); rmap.set(relatedPK === 'id' ? String(r._id) : r[relatedPK], r); });
+        rows.forEach(r => {
+            if (r && r._id && !('id' in r)) r.id = String(r._id);
+            const idStr = String(r._id);
+            const token = idStr.slice(0,8);
+            rmap.set(idStr, r);
+            rmap.set(token, r);
+        });
         const grouped = new Map<any, any[]>();
-        pivots.forEach((p: any) => { const pid = p[foreignPivotKey]; const rid = p[relatedPivotKey]; if (!grouped.has(pid)) grouped.set(pid, []); const relRow = rmap.get(relatedPK === 'id' ? String(rid) : rid); if (relRow) grouped.get(pid)!.push(relRow); });
-        models.forEach(m => { const pid = (m as any).getAttribute(parentPK); const list = (grouped.get(pid) || []).map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row); return inst; }); this.setRelation(m, relation, list); });
+        pivots.forEach((p: any) => {
+            const pidVal = p[foreignPivotKey];
+            const pidStr = String(pidVal);
+            const ridStr = String(p[relatedPivotKey]);
+            const relRow = rmap.get(ridStr) || rmap.get(String(ridStr));
+            if (relRow) {
+                if (!grouped.has(pidVal)) grouped.set(pidVal, []);
+                grouped.get(pidVal)!.push(relRow);
+                // also index by string form of parent id for lookup flexibility
+                if (!grouped.has(pidStr)) grouped.set(pidStr, []);
+                grouped.get(pidStr)!.push(relRow);
+            }
+        });
+        models.forEach(m => {
+            const pid = (m as any).getAttribute(parentPK);
+            const forms = parentPK === 'id' ? this.expandIdForms(pid) : [pid];
+            const seen = new Set<string>();
+            const collected: any[] = [];
+            forms.forEach(f => {
+                const fStr = String(f);
+                const arr = grouped.get(f) || grouped.get(fStr) || [];
+                for (const r of arr) {
+                    const sid = r._id ? String(r._id) : JSON.stringify(r);
+                    if (!seen.has(sid)) { seen.add(sid); collected.push(r); }
+                }
+            });
+            const list = collected.map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row); return inst; });
+            this.setRelation(m, relation, list);
+        });
     }
 
     private async loadMorphRelationsMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const morphType = rel.morphName || (this.model as typeof Model).getTable();
         const foreignKey = rel.foreignKey || `${morphType}_id`;
         const morphTypeKey = rel.morphType || `${morphType}_type`;
-        const localIds = Array.from(new Set(models.map(m => (m as any).getAttribute('id')).filter((v: any) => v !== undefined)));
-        if (!localIds.length) { models.forEach(m => this.setRelation(m, relation, rel.type === 'morphOne' ? null : [])); return; }
+        const localsRaw = models.map(m => (m as any).getAttribute('id')).filter((v: any) => v !== undefined);
+        if (!localsRaw.length) { models.forEach(m => this.setRelation(m, relation, rel.type === 'morphOne' ? null : [])); return; }
+        const matchVals = Array.from(new Set(localsRaw.flatMap(v => this.expandIdForms(v))));
         const c = mongoCollection(relatedTable);
-        const rows = await c.find({ [foreignKey]: { $in: localIds }, [morphTypeKey]: morphType }).toArray();
+        const rows = await c.find({ [foreignKey]: { $in: matchVals }, [morphTypeKey]: morphType } as any).toArray();
         if (rel.type === 'morphOne') {
-            const byFK = new Map<any, any>(); rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); byFK.set(r[foreignKey], r); });
-            models.forEach(m => { const key = (m as any).getAttribute('id'); const row = byFK.get(key) || null; if (row) { const inst = new (relatedModel as any)(); inst.hydrate(row); this.setRelation(m, relation, inst); } else this.setRelation(m, relation, null); });
+            const byFK = new Map<any, any>(); rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); byFK.set(r[foreignKey], r); byFK.set(String(r[foreignKey]), r); });
+            models.forEach(m => { const key = (m as any).getAttribute('id'); const cand = this.expandIdForms(key); const row = cand.map(v => byFK.get(v) || byFK.get(String(v))).find(Boolean) || null; if (row) { const inst = new (relatedModel as any)(); inst.hydrate(row); this.setRelation(m, relation, inst); } else this.setRelation(m, relation, null); });
         } else {
-            const grouped = new Map<any, any[]>(); rows.forEach(r => { const k = r[foreignKey]; if (r && r._id && !('id' in r)) r.id = String(r._id); if (!grouped.has(k)) grouped.set(k, []); grouped.get(k)!.push(r); });
-            models.forEach(m => { const key = (m as any).getAttribute('id'); const list = (grouped.get(key) || []).map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row); return inst; }); this.setRelation(m, relation, list); });
+            const grouped = new Map<any, any[]>(); rows.forEach(r => { const k = r[foreignKey]; if (r && r._id && !('id' in r)) r.id = String(r._id); if (!grouped.has(k)) grouped.set(k, []); grouped.get(k)!.push(r); const ks = String(k); if (!grouped.has(ks)) grouped.set(ks, []); grouped.get(ks)!.push(r); });
+            models.forEach(m => { const key = (m as any).getAttribute('id'); const keys = this.expandIdForms(key).map(v => String(v)); const acc: any[] = []; keys.forEach(k => { const arr = grouped.get(k) || []; if (arr.length) acc.push(...arr); }); const uniq = Array.from(new Set(acc.map(x => x._id ? String(x._id) : JSON.stringify(x)))).map(id => acc.find(x => (x._id ? String(x._id) : JSON.stringify(x)) === id)); const list = uniq.map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row!); return inst; }); this.setRelation(m, relation, list); });
         }
     }
 }

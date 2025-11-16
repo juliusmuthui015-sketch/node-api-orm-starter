@@ -566,6 +566,29 @@ export abstract class Model {
 
         if (isMongo) {
             const c = mongoCollection(table);
+            // Helper: normalize any foreign key fields to ObjectId if possible, else string
+            const normalizeForeignIds = (obj: Record<string, any>) => {
+                Object.keys(obj).forEach((k) => {
+                    if (!k || !k.endsWith('_id')) return;
+                    const v = obj[k];
+                    if (v === undefined || v === null) return;
+                    try {
+                        if (v instanceof ObjectId) {
+                            obj[k] = v;
+                            return;
+                        }
+                        const str = String(v);
+                        if (/^[0-9a-fA-F]{24}$/.test(str)) {
+                            obj[k] = new ObjectId(str);
+                        } else {
+                            obj[k] = str;
+                        }
+                    } catch {
+                        obj[k] = String(v);
+                    }
+                });
+            };
+
             if (doInsert) {
                 const doc: any = { ...attrs };
                 if (primaryKey === 'id') {
@@ -574,6 +597,8 @@ export abstract class Model {
                         delete doc.id;
                     }
                 }
+                // Normalize FK fields for Mongo
+                normalizeForeignIds(doc);
                 const res = await c.insertOne(doc);
                 if (primaryKey === 'id') this.setAttribute('id', String(res.insertedId));
                 this.__exists = true;
@@ -582,6 +607,8 @@ export abstract class Model {
                 const setDoc: any = {};
                 Object.keys(dirty).forEach(k => { if (k === primaryKey && primaryKey === 'id') return; setDoc[k] = dirty[k]; });
                 if (Object.keys(setDoc).length) {
+                    // Normalize FK fields for Mongo
+                    normalizeForeignIds(setDoc);
                     const filter: any = primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id };
                     await c.updateOne(filter, { $set: setDoc });
                 }
