@@ -11,6 +11,15 @@
 // });
 // // sql is a CREATE TABLE ... statement
 
+import { getDbType, getMongoDb } from '@/config/db.config';
+
+// Common interface to support both SQL and Mongo schema builders
+export interface MigrationSchema {
+  createTable(name: string, callback: (table: TableBuilder) => void): any;
+  alterTable(name: string, callback: (table: TableBuilder) => void): any;
+  dropTable(name: string): any;
+}
+
 type DefaultValue = string | number | boolean | null;
 
 export class Column {
@@ -306,7 +315,7 @@ export class TableBuilder {
   }
 }
 
-export default class Schema {
+export default class Schema implements MigrationSchema {
   createTable(name: string, callback: (table: TableBuilder) => void) {
     const tb = new TableBuilder(name, 'create');
     callback(tb);
@@ -321,5 +330,76 @@ export default class Schema {
 
   dropTable(name: string) {
     return `DROP TABLE IF EXISTS \`${name}\`;`;
+  }
+}
+
+// MongoSchema: records operations and applies them using MongoDB
+export class MongoSchema implements MigrationSchema {
+  private ops: Array<{ type: 'create'|'alter'|'drop', table: string, tb?: TableBuilder }>= [];
+
+  createTable(name: string, callback: (table: TableBuilder) => void) {
+    const tb = new TableBuilder(name, 'create');
+    callback(tb);
+    this.ops.push({ type: 'create', table: name, tb });
+    return undefined as any; // runner will call apply()
+  }
+
+  alterTable(name: string, callback: (table: TableBuilder) => void) {
+    const tb = new TableBuilder(name, 'alter');
+    callback(tb);
+    this.ops.push({ type: 'alter', table: name, tb });
+    return undefined as any;
+  }
+
+  dropTable(name: string) {
+    this.ops.push({ type: 'drop', table: name });
+    return undefined as any;
+  }
+
+  async apply(): Promise<void> {
+    if (getDbType() !== 'mongodb') return;
+    const db = getMongoDb();
+    for (const op of this.ops) {
+      if (op.type === 'create' && op.tb) {
+        // create collection if not exists
+        const exists = await db.listCollections({ name: op.table }).hasNext();
+        if (!exists) {
+          await db.createCollection(op.table);
+        }
+        // indexes
+        const c = db.collection(op.table);
+        // primary key: nothing to do; Mongo always has _id
+        // unique indexes
+        for (const uq of (op.tb.uniques || [])) {
+          try { await c.createIndex({ [uq]: 1 }, { unique: true, name: `${op.table}_${uq}_uniq` }); } catch (_) {}
+        }
+        // other indexes
+        for (const ix of (op.tb.indexes || [])) {
+          const name = ix.name || `${op.table}_${ix.columns.join('_')}${ix.unique ? '_uniq' : '_idx'}`;
+          const spec: any = {};
+          ix.columns.forEach(col => spec[col] = 1);
+          try { await c.createIndex(spec, { unique: Boolean(ix.unique), name }); } catch (_) {}
+        }
+      } else if (op.type === 'alter' && op.tb) {
+        const c = db.collection(op.table);
+        // add indexes
+        for (const ix of (op.tb.indexes || [])) {
+          const name = ix.name || `${op.table}_${ix.columns.join('_')}${ix.unique ? '_uniq' : '_idx'}`;
+          const spec: any = {};
+          ix.columns.forEach(col => spec[col] = 1);
+          try { await c.createIndex(spec, { unique: Boolean(ix.unique), name }); } catch (_) {}
+        }
+        // drop indexes
+        for (const dropName of (op.tb.dropIndexes || [])) {
+          try { await c.dropIndex(dropName); } catch (_) {}
+        }
+        // drop foreign keys no-op
+        // drop columns and change/rename columns are not supported here — no-op in Mongo
+      } else if (op.type === 'drop') {
+        try { await db.collection(op.table).drop(); } catch (_) {}
+      }
+    }
+    // clear ops after applying
+    this.ops = [];
   }
 }

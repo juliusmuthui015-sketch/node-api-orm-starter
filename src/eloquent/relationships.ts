@@ -1,7 +1,7 @@
 // relationships.ts
 import { Model } from './Model';
 import { EloquentBuilder } from './EloquentBuilder';
-import { query as dbQuery } from '@/config/db.config';
+import { query as dbQuery, getDbType, collection as mongoCollection } from '@/config/db.config';
 
 export abstract class Relation<T extends Model> {
     protected query: EloquentBuilder<T>;
@@ -233,6 +233,7 @@ export class HasMany<T extends Model> extends Relation<T> {
 
     // Collection management
     async attach(model: T | number | string): Promise<void> {
+        const dbType = getDbType();
         let relatedId: number | string;
 
         if (typeof model === 'number' || typeof model === 'string') {
@@ -246,6 +247,11 @@ export class HasMany<T extends Model> extends Relation<T> {
         }
 
         const foreignValue = (this.parent as any).getAttribute(this.localKey);
+        if (dbType === 'mongodb') {
+            const c = mongoCollection((this.relatedModel as typeof Model).getTable());
+            await c.updateOne({ [(this.relatedModel as any).primaryKey || 'id']: relatedId } as any, { $set: { [this.foreignKey]: foreignValue } });
+            return;
+        }
         await dbQuery(
             `UPDATE ${(this.relatedModel as typeof Model).getTable()} SET ${this.foreignKey} = ? WHERE ${(this.relatedModel as any).primaryKey || 'id'} = ?`,
             [foreignValue, relatedId]
@@ -254,9 +260,15 @@ export class HasMany<T extends Model> extends Relation<T> {
 
     async detach(model?: T | number | string): Promise<number> {
         const foreignValue = (this.parent as any).getAttribute(this.localKey);
+        const dbType = getDbType();
 
         if (model === undefined) {
             // Detach all
+            if (dbType === 'mongodb') {
+                const c = mongoCollection((this.relatedModel as typeof Model).getTable());
+                const res = await c.updateMany({ [this.foreignKey]: foreignValue } as any, { $set: { [this.foreignKey]: null } });
+                return Number(res.modifiedCount || 0);
+            }
             return await this.query
                 .where(this.foreignKey, foreignValue)
                 .update({ [this.foreignKey]: null });
@@ -270,6 +282,11 @@ export class HasMany<T extends Model> extends Relation<T> {
             relatedId = (model as any).getAttribute((this.relatedModel as any).primaryKey || 'id');
         }
 
+        if (dbType === 'mongodb') {
+            const c = mongoCollection((this.relatedModel as typeof Model).getTable());
+            const res = await c.updateOne({ [(this.relatedModel as any).primaryKey || 'id']: relatedId, [this.foreignKey]: foreignValue } as any, { $set: { [this.foreignKey]: null } });
+            return Number(res.modifiedCount || 0);
+        }
         return await dbQuery(
             `UPDATE ${(this.relatedModel as typeof Model).getTable()} SET ${this.foreignKey} = NULL WHERE ${(this.relatedModel as any).primaryKey || 'id'} = ? AND ${this.foreignKey} = ?`,
             [relatedId, foreignValue]
@@ -415,6 +432,24 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
         const parentId = (this.parent as any).getAttribute(this.parentPrimaryKey);
         if (parentId === undefined || parentId === null) return [];
 
+        if (getDbType() === 'mongodb') {
+            const pc = mongoCollection(this.pivotTable);
+            const pivotFilter: any = { [this.foreignPivotKey]: parentId };
+            this.pivotWheres.forEach(w => { Object.assign(pivotFilter, { [w.column]: { ['$' + (w.operator === '=' ? 'eq' : w.operator === '!=' ? 'ne' : 'eq')]: w.value } }); });
+            const pivots = await pc.find(pivotFilter).toArray();
+            if (!pivots.length) return [];
+            const relatedIds = pivots.map((r: any) => r[this.relatedPivotKey]);
+            const rc = mongoCollection((this.relatedModel as typeof Model).getTable());
+            const docs = await rc.find({ [this.relatedPrimaryKey === 'id' ? 'id' : this.relatedPrimaryKey]: { $in: relatedIds } } as any).toArray();
+            const pivotMap = new Map(pivots.map((r: any) => [r[this.relatedPivotKey], r]));
+            return docs.map(row => {
+                const instance = new (this.relatedModel as any)(row) as T;
+                const pivotData = pivotMap.get((row as any)[this.relatedPrimaryKey]);
+                if (pivotData) (instance as any).pivot = this.createPivot(pivotData);
+                return instance;
+            });
+        }
+
         // Get related IDs from pivot with additional pivot conditions
         let pivotSql = `SELECT ${this.relatedPivotKey} AS related_id`;
 
@@ -477,6 +512,7 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
         if (parentId === undefined || parentId === null) return;
 
         const attachments = Array.isArray(relatedId) ? relatedId : [relatedId];
+        const isMongo = getDbType() === 'mongodb';
 
         for (const attachment of attachments) {
             let actualRelatedId: number | string;
@@ -488,6 +524,16 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
                 actualRelatedId = attachment[this.relatedPrimaryKey];
                 pivotData = { ...attachment, ...extra };
                 delete pivotData[this.relatedPrimaryKey];
+            }
+
+            if (isMongo) {
+                const pc = mongoCollection(this.pivotTable);
+                await pc.updateOne(
+                    { [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: actualRelatedId } as any,
+                    { $set: { ...pivotData, [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: actualRelatedId } },
+                    { upsert: true }
+                );
+                continue;
             }
 
             const columns = [this.foreignPivotKey, this.relatedPivotKey, ...Object.keys(pivotData)];
@@ -511,6 +557,17 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
     async detach(relatedIds?: (number | string)[]): Promise<number> {
         const parentId = (this.parent as any).getAttribute(this.parentPrimaryKey);
         if (parentId === undefined || parentId === null) return 0;
+        const isMongo = getDbType() === 'mongodb';
+
+        if (isMongo) {
+            const pc = mongoCollection(this.pivotTable);
+            if (relatedIds && relatedIds.length > 0) {
+                const res = await pc.deleteMany({ [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: { $in: relatedIds } } as any);
+                return Number(res.deletedCount || 0);
+            }
+            const res = await pc.deleteMany({ [this.foreignPivotKey]: parentId } as any);
+            return Number(res.deletedCount || 0);
+        }
 
         let sql = `DELETE FROM ${this.pivotTable} WHERE ${this.foreignPivotKey} = ?`;
         const params: any[] = [parentId];
@@ -531,54 +588,62 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
             return { attached: [], detached: [], updated: [] };
         }
 
+        const isMongo = getDbType() === 'mongodb';
+
         // Get current related IDs
-        const currentPivotRows = await dbQuery<any>(
-            `SELECT ${this.relatedPivotKey} FROM ${this.pivotTable} WHERE ${this.foreignPivotKey} = ?`,
-            [parentId]
-        );
+        let currentIdsSet = new Set<any>();
+        if (isMongo) {
+            const pc = mongoCollection(this.pivotTable);
+            const rows = await pc.find({ [this.foreignPivotKey]: parentId } as any).project({ [this.relatedPivotKey]: 1, _id: 0 }).toArray();
+            currentIdsSet = new Set(rows.map((r: any) => r[this.relatedPivotKey]));
+        } else {
+            const currentPivotRows = await dbQuery<any>(
+                `SELECT ${this.relatedPivotKey} FROM ${this.pivotTable} WHERE ${this.foreignPivotKey} = ?`,
+                [parentId]
+            );
+            currentIdsSet = new Set(currentPivotRows.map((r: any) => r[this.relatedPivotKey]));
+        }
 
-        const currentIds = new Set(currentPivotRows.map((r: any) => r[this.relatedPivotKey]));
-        const newIds = new Set();
-
+        const newIds = new Set<any>();
         const attached: any[] = [];
         const detached: any[] = [];
         const updated: any[] = [];
 
-        // Process new IDs
-        for (const relatedId of relatedIds) {
-            let actualId: number | string;
+        for (const related of relatedIds) {
+            let actualId: any;
             let extraData: Record<string, any> = {};
 
-            if (typeof relatedId === 'number' || typeof relatedId === 'string') {
-                actualId = relatedId;
+            if (typeof related === 'number' || typeof related === 'string') {
+                actualId = related;
             } else {
-                actualId = relatedId[this.relatedPrimaryKey];
-                extraData = { ...relatedId };
+                actualId = related[this.relatedPrimaryKey];
+                extraData = { ...related };
                 delete extraData[this.relatedPrimaryKey];
             }
 
             newIds.add(actualId);
 
-            if (currentIds.has(actualId)) {
-                // Update existing pivot
+            if (currentIdsSet.has(actualId)) {
                 if (Object.keys(extraData).length > 0) {
-                    const setSql = Object.keys(extraData).map(k => `${k} = ?`).join(', ');
-                    await dbQuery(
-                        `UPDATE ${this.pivotTable} SET ${setSql} WHERE ${this.foreignPivotKey} = ? AND ${this.relatedPivotKey} = ?`,
-                        [...Object.values(extraData), parentId, actualId]
-                    );
+                    if (isMongo) {
+                        await mongoCollection(this.pivotTable).updateOne({ [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: actualId } as any, { $set: extraData });
+                    } else {
+                        const setSql = Object.keys(extraData).map(k => `${k} = ?`).join(', ');
+                        await dbQuery(
+                            `UPDATE ${this.pivotTable} SET ${setSql} WHERE ${this.foreignPivotKey} = ? AND ${this.relatedPivotKey} = ?`,
+                            [...Object.values(extraData), parentId, actualId]
+                        );
+                    }
                     updated.push(actualId);
                 }
             } else {
-                // Attach new
-                await this.attach(relatedId);
+                await this.attach({ [this.relatedPrimaryKey]: actualId, ...extraData } as any);
                 attached.push(actualId);
             }
         }
 
-        // Detach removed IDs
         if (detaching) {
-            for (const currentId of currentIds) {
+            for (const currentId of currentIdsSet) {
                 if (!newIds.has(currentId)) {
                     await this.detach([currentId]);
                     detached.push(currentId);
@@ -594,14 +659,22 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
         if (parentId === undefined || parentId === null) {
             return { attached: [], detached: [] };
         }
+        const isMongo = getDbType() === 'mongodb';
 
         // Check which IDs are currently attached
-        const placeholders = relatedIds.map(() => '?').join(',');
-        const currentRows = await dbQuery<any>(
-            `SELECT ${this.relatedPivotKey} FROM ${this.pivotTable} 
+        const toCheck = relatedIds;
+        let currentRows: any[] = [];
+        if (isMongo) {
+            const pc = mongoCollection(this.pivotTable);
+            currentRows = await pc.find({ [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: { $in: toCheck } } as any).project({ [this.relatedPivotKey]: 1, _id: 0 }).toArray();
+        } else {
+            const placeholders = relatedIds.map(() => '?').join(',');
+            currentRows = await dbQuery<any>(
+                `SELECT ${this.relatedPivotKey} FROM ${this.pivotTable} 
        WHERE ${this.foreignPivotKey} = ? AND ${this.relatedPivotKey} IN (${placeholders})`,
-            [parentId, ...relatedIds]
-        );
+                [parentId, ...relatedIds]
+            );
+        }
 
         const currentIds = new Set(currentRows.map((r: any) => r[this.relatedPivotKey]));
 
@@ -625,6 +698,12 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
     async updateExistingPivot(relatedId: number | string, attributes: Record<string, any>): Promise<number> {
         const parentId = (this.parent as any).getAttribute(this.parentPrimaryKey);
         if (parentId === undefined || parentId === null) return 0;
+        const isMongo = getDbType() === 'mongodb';
+
+        if (isMongo) {
+            const res = await mongoCollection(this.pivotTable).updateOne({ [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: relatedId } as any, { $set: attributes });
+            return Number(res.modifiedCount || 0);
+        }
 
         const setSql = Object.keys(attributes).map(k => `${k} = ?`).join(', ');
         const result: any = await dbQuery(
@@ -673,6 +752,11 @@ export class Pivot {
         delete updateData[this.foreignPivotKey];
         delete updateData[this.relatedPivotKey];
 
+        if (getDbType() === 'mongodb') {
+            const res = await mongoCollection(this.pivotTable).updateOne({ [this.foreignPivotKey]: foreignValue, [this.relatedPivotKey]: relatedValue } as any, { $set: updateData });
+            return Number(res.modifiedCount || 0) > 0;
+        }
+
         const setSql = Object.keys(updateData).map(k => `${k} = ?`).join(', ');
         const values = [...Object.values(updateData), foreignValue, relatedValue];
 
@@ -689,6 +773,12 @@ export class Pivot {
         const relatedValue = this.attributes[this.relatedPivotKey];
 
         if (!foreignValue || !relatedValue) return false;
+
+        if (getDbType() === 'mongodb') {
+            const res = await mongoCollection(this.pivotTable).deleteOne({ [this.foreignPivotKey]: foreignValue, [this.relatedPivotKey]: relatedValue } as any);
+            if (Number(res.deletedCount || 0) > 0) { this.exists = false; return true; }
+            return false;
+        }
 
         const result: any = await dbQuery(
             `DELETE FROM ${this.pivotTable} WHERE ${this.foreignPivotKey} = ? AND ${this.relatedPivotKey} = ?`,

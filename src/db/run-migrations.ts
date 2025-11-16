@@ -3,10 +3,23 @@ import path from 'path';
 import crypto from 'crypto';
 import readline from 'readline';
 import os from 'os';
-import { query, initDatabase } from '../config/db.config';
-import Schema from './Schema';
+import { query, initDatabase, getDbType, getMongoDb } from '@/config/db.config';
+import Schema, { MongoSchema } from './Schema';
 
 async function ensureMigrationsTable() {
+  if (getDbType() === 'mongodb') {
+    const db = getMongoDb();
+    // ensure migrations collection exists and unique index on name
+    const exists = await db.listCollections({ name: 'migrations' }).hasNext();
+    if (!exists) await db.createCollection('migrations');
+    const mig = db.collection('migrations');
+    try { await mig.createIndex({ name: 1 }, { unique: true }); } catch (e) {}
+    const lockExists = await db.listCollections({ name: 'migration_locks' }).hasNext();
+    if (!lockExists) await db.createCollection('migration_locks');
+    // ensure a unique index on lock_name for safe lock acquisition without relying on _id type
+    try { await db.collection('migration_locks').createIndex({ lock_name: 1 }, { unique: true, name: 'lock_name_unique' }); } catch (e) {}
+    return;
+  }
   const sql = `CREATE TABLE IF NOT EXISTS \`migrations\` (
     id INT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(255) NOT NULL UNIQUE,
@@ -31,6 +44,27 @@ async function ensureMigrationsTable() {
 }
 
 async function acquireLock(lockName: string, timeoutSec = 10, retries = 5, backoffMs = 1000) {
+  if (getDbType() === 'mongodb') {
+    const db = getMongoDb();
+    const coll = db.collection('migration_locks');
+    let attempt = 0;
+    while (true) {
+      attempt++;
+      try {
+        await coll.insertOne({ lock_name: lockName, owner: process.env.USER || os.userInfo().username || null, owner_pid: process.pid, acquired_at: new Date(), released_at: null });
+        return; // acquired
+      } catch (e: any) {
+        if (e && e.code === 11000) {
+          if (attempt >= (retries || 1)) break;
+          const wait = backoffMs * Math.pow(2, attempt - 1);
+          await new Promise(res => setTimeout(res, wait));
+          continue;
+        }
+        throw e;
+      }
+    }
+    throw new Error(`Could not acquire migration lock '${lockName}' after ${retries} attempts`);
+  }
   let attempt = 0;
   while (true) {
     attempt++;
@@ -56,6 +90,11 @@ async function acquireLock(lockName: string, timeoutSec = 10, retries = 5, backo
 }
 
 async function releaseLock(lockName: string) {
+  if (getDbType() === 'mongodb') {
+    const db = getMongoDb();
+    try { await db.collection('migration_locks').deleteOne({ lock_name: lockName }); } catch {}
+    return;
+  }
   try {
     const rows: any[] = await query('SELECT RELEASE_LOCK(?) as released', [lockName]);
     const released = rows && rows[0] && (rows[0].released === 1 || rows[0].released === '1');
@@ -97,6 +136,13 @@ async function promptConfirm(question: string) {
 }
 
 async function getAppliedMigrations() {
+  if (getDbType() === 'mongodb') {
+    const db = getMongoDb();
+    const rows = await db.collection('migrations').find({}, { projection: { _id: 0 } }).sort({ migrated_at: 1 }).toArray();
+    const map: Record<string, any> = {};
+    for (const r of rows) map[r.name] = r;
+    return { rows, map };
+  }
   const rows: any[] = await query('SELECT name, checksum, batch, migrated_at, ran_by, ran_host FROM `migrations` ORDER BY id');
   const map: Record<string, any> = {};
   for (const r of rows) map[r.name] = r;
@@ -104,11 +150,17 @@ async function getAppliedMigrations() {
 }
 
 async function getCurrentMaxBatch() {
+  if (getDbType() === 'mongodb') {
+    const db = getMongoDb();
+    const row = await db.collection('migrations').aggregate([{ $group: { _id: null, maxBatch: { $max: '$batch' } } }]).toArray();
+    return (row && row[0] && row[0].maxBatch) || 0;
+  }
   const rows: any[] = await query('SELECT MAX(batch) as maxBatch FROM `migrations`');
   return (rows && rows[0] && rows[0].maxBatch) || 0;
 }
 
 async function runSql(sql: string) {
+  if (getDbType() === 'mongodb') return; // noop
   // rely on mysql2 pool with multipleStatements enabled
   await query(sql);
 }
@@ -116,8 +168,7 @@ async function runSql(sql: string) {
 async function run() {
   await initDatabase();
 
-  // Ensure migrations tables exist BEFORE attempting to acquire a lock.
-  // acquireLock inserts into `migration_locks`, so the table must be present first.
+  // Ensure migrations tables/collections exist BEFORE attempting to acquire a lock.
   await ensureMigrationsTable();
 
   const args = parseArgs(process.argv);
@@ -215,13 +266,23 @@ async function run() {
           }
           const mod = require(path.join(dir, f));
           if (mod && typeof mod.up === 'function') {
-            const schema = new Schema();
-            const res = await mod.up(schema, query);
-            if (typeof res === 'string') await runSql(res);
-            const ranBy = process.env.USER || os.userInfo().username || null;
-            const ranHost = os.hostname();
-            const pid = process.pid;
-            await query('INSERT INTO `migrations` (name, checksum, batch, migrated_at, ran_by, ran_host, ran_pid) VALUES (?, ?, ?, NOW(), ?, ?, ?)', [f, ch, newBatch, ranBy, ranHost, pid]);
+            if (getDbType() === 'mongodb') {
+              const schema = new MongoSchema();
+              await mod.up(schema, undefined);
+              await schema.apply();
+              const ranBy = process.env.USER || os.userInfo().username || null;
+              const ranHost = os.hostname();
+              const pid = process.pid;
+              await getMongoDb().collection('migrations').insertOne({ name: f, checksum: ch, batch: newBatch, migrated_at: new Date(), ran_by: ranBy, ran_host: ranHost, ran_pid: pid });
+            } else {
+              const schema = new Schema();
+              const res = await mod.up(schema, query);
+              if (typeof res === 'string') await runSql(res);
+              const ranBy = process.env.USER || os.userInfo().username || null;
+              const ranHost = os.hostname();
+              const pid = process.pid;
+              await query('INSERT INTO `migrations` (name, checksum, batch, migrated_at, ran_by, ran_host, ran_pid) VALUES (?, ?, ?, NOW(), ?, ?, ?)', [f, ch, newBatch, ranBy, ranHost, pid]);
+            }
           } else {
             throw new Error(`Migration ${f} does not export an up(schema, query) function`);
           }
@@ -238,7 +299,37 @@ async function run() {
     // down / rollback (unchanged logic below)
     if (args.command === 'down') {
       const step = args.step || 1;
-      // get distinct batches descending
+      if (getDbType() === 'mongodb') {
+        const db = getMongoDb();
+        const batches = await db.collection('migrations').distinct('batch');
+        const sortedDesc = (batches as number[]).filter((x:any)=>x!=null).sort((a,b)=>b-a).slice(0, step);
+        if (!sortedDesc.length) { console.log('No migrations to rollback'); return; }
+        const rows = await db.collection('migrations').find({ batch: { $in: sortedDesc } }).sort({ migrated_at: -1 }).toArray();
+        if (!rows.length) { console.log('No migrations found for requested batches'); return; }
+        const dir2 = path.resolve(__dirname, './migrations');
+        for (const r of rows) {
+          const f = r.name as string;
+          const full = path.join(dir2, f);
+          console.log('Reverting migration', f);
+          if (fs.existsSync(full) && (f.endsWith('.js') || f.endsWith('.ts'))) {
+            if (f.endsWith('.ts')) { try { require('ts-node/register/transpile-only'); } catch (e) {} }
+            const mod = require(full);
+            if (mod && typeof mod.down === 'function') {
+              const schema = new MongoSchema();
+              await mod.down(schema, undefined);
+              await schema.apply();
+              await db.collection('migrations').deleteOne({ name: f });
+              continue;
+            } else {
+              throw new Error(`Migration ${f} does not export a down(schema, query) function; rollback aborted`);
+            }
+          }
+          throw new Error(`Cannot rollback migration ${f}: SQL migrations are deprecated. Provide a JS/TS migration with down(schema, query).`);
+        }
+        console.log('Rollback complete for batches', sortedDesc.join(','));
+        return;
+      }
+      // MySQL path
       const batchesRows: any[] = await query('SELECT DISTINCT batch FROM `migrations` ORDER BY batch DESC');
       if (!batchesRows.length) { console.log('No migrations to rollback'); return; }
       const batches = batchesRows.map(r => r.batch).slice(0, step);

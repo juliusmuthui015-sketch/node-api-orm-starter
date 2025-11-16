@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { initDatabase, query } from '@/config/db.config';
+import { initDatabase, query, getDbType, getMongoDb, collection as mongoCollection } from '@/config/db.config';
 
 function parseArgs(argv: string[]) {
   const out: any = { runAll: true };
@@ -12,13 +12,35 @@ function parseArgs(argv: string[]) {
   return out;
 }
 
+// Provide a DB-aware context to seeders that accept an argument
+type SqlSeederCtx = { type: 'mysql', query: typeof query };
+// Use loose any to avoid importing mongodb types here
+type MongoSeederCtx = { type: 'mongodb', db: any, collection: (name: string) => any };
+
+type SeederCtx = SqlSeederCtx | MongoSeederCtx;
+
+function makeSeederContext(): SeederCtx {
+  const t = getDbType();
+  if (t === 'mongodb') {
+    const db = getMongoDb();
+    return { type: 'mongodb', db, collection: (name: string) => mongoCollection(name) };
+  }
+  return { type: 'mysql', query };
+}
+
 async function loadAndRunSeeder(filePath: string) {
   const mod = require(filePath);
   // try several common export patterns
   const fn = mod && (mod.seed || mod.default || mod.run || mod);
   if (typeof fn === 'function') {
-    // seeders may accept (query) or no args
-    const res = fn.length >= 1 ? fn(query) : fn();
+    // If seeder expects an argument, pass either query (MySQL) or Mongo context (MongoDB)
+    const wantsArg = fn.length >= 1;
+    let arg: any = undefined;
+    if (wantsArg) {
+      const t = getDbType();
+      if (t === 'mysql') arg = query; else arg = makeSeederContext();
+    }
+    const res = wantsArg ? fn(arg) : fn();
     if (res && typeof res.then === 'function') await res;
     return true;
   }

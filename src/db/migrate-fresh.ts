@@ -1,5 +1,5 @@
 import readline from 'readline';
-import { initDatabase, query } from '../config/db.config';
+import { initDatabase, query, getDbType, getMongoDb } from '../config/db.config';
 import path from 'path';
 
 function parseArgs(argv: string[]) {
@@ -23,6 +23,54 @@ async function promptConfirm(question: string) {
 async function run() {
   await initDatabase();
   const args = parseArgs(process.argv);
+
+  if (getDbType() === 'mongodb') {
+    const db = getMongoDb();
+    const dbName = db.databaseName;
+
+    if (!args.force) {
+      const ok = await promptConfirm(`This will DROP ALL COLLECTIONS in database '${dbName}'. Are you sure? (y/N)`);
+      if (!ok) {
+        console.log('Aborted.');
+        process.exit(0);
+      }
+    } else {
+      console.log('Force flag provided; proceeding without confirmation');
+    }
+
+    // Drop all collections
+    const collections = await db.collections();
+    for (const c of collections) {
+      try { await c.drop(); } catch (e) { /* ignore */ }
+    }
+
+    // Run migrations
+    console.log('Running migrations...');
+    const mmod = require('./run-migrations');
+    if (mmod && typeof mmod.run === 'function') {
+      await mmod.run();
+    } else {
+      throw new Error('run-migrations module does not export run()');
+    }
+
+    // optionally run seeders
+    if (args.seed) {
+      console.log('Running seeders...');
+      const smod = require('./run-seeders');
+      if (smod && typeof smod.runWithOptions === 'function') {
+        await smod.runWithOptions({ class: args.seederClass });
+      } else if (smod && typeof smod.run === 'function') {
+        await smod.run();
+      } else {
+        console.warn('Seeder runner not available');
+      }
+    }
+
+    console.log('migrate:fresh complete');
+    return;
+  }
+
+  // MySQL path
   const dbNameRows: any = await query('SELECT DATABASE() as db');
   const dbName = dbNameRows && dbNameRows[0] && dbNameRows[0].db;
 

@@ -1,7 +1,8 @@
 // EloquentBuilder.ts
 import { Model } from './Model';
 import { WhereClause, QueryResult, JoinClause, EagerLoadOptions } from './types';
-import { query as dbQuery } from '@/config/db.config';
+import { query as dbQuery, getDbType, collection as mongoCollection } from '@/config/db.config';
+import { ObjectId } from 'mongodb';
 
 export class EloquentBuilder<T extends Model> {
     private model: typeof Model;
@@ -295,16 +296,6 @@ export class EloquentBuilder<T extends Model> {
 
         // Return the actual Model instances, NOT their JSON representation
         return models
-        //     .map(m => {
-        //     if (typeof (m as any).toJSON === 'function') {
-        //         // Pass the relation tree to toJSON for proper nested serialization
-        //         return (m as any).toJSON({
-        //             relationTree: this.relationTree,
-        //             maxDepth: 10 // You can make this configurable
-        //         });
-        //     }
-        //     return m;
-        // });
     }
 
     async toArray(): Promise<any[]> {
@@ -408,6 +399,9 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async update(values: Partial<Record<string, any>>): Promise<number> {
+        if (getDbType() === 'mongodb') {
+            return this.updateMongo(values);
+        }
         const tableName = (this.model as typeof Model).getTable();
         const keys = Object.keys(values || {});
         if (!keys.length) return 0;
@@ -422,6 +416,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async increment(column: string, amount: number = 1): Promise<number> {
+        if (getDbType() === 'mongodb') return this.updateMongo({ [column]: { $inc: amount } } as any);
         const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const sql = `UPDATE ${tableName} SET ${column} = ${column} + ?${where.sql}`;
@@ -431,6 +426,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async decrement(column: string, amount: number = 1): Promise<number> {
+        if (getDbType() === 'mongodb') return this.updateMongo({ [column]: { $dec: amount } } as any); // treat as custom
         const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const sql = `UPDATE ${tableName} SET ${column} = ${column} - ?${where.sql}`;
@@ -440,6 +436,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async delete(): Promise<number> {
+        if (getDbType() === 'mongodb') return this.deleteMongo();
         const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const supportsSoft = Boolean((this.model as any).softDeletes);
@@ -458,6 +455,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async insert(rows: Array<Record<string, any>>): Promise<number> {
+        if (getDbType() === 'mongodb') return this.insertMongoMany(rows);
         if (!rows || !rows.length) return 0;
         const tableName = (this.model as typeof Model).getTable();
         const cols = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
@@ -471,6 +469,17 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async insertGetId(row: Record<string, any>): Promise<number> {
+        if (getDbType() === 'mongodb') {
+            const c = mongoCollection((this.model as typeof Model).getTable());
+            const doc = { ...row } as any;
+            if ('id' in doc && doc.id && !doc._id) {
+                try { doc._id = new ObjectId(String(doc.id)); } catch { doc._id = doc.id; }
+                delete doc.id;
+            }
+            const res = await c.insertOne(doc);
+            // return fake numeric id length for compatibility; Model.save will set id properly
+            return (res.insertedId as any) as number;
+        }
         const tableName = (this.model as typeof Model).getTable();
         const cols = Object.keys(row);
         const placeholders = `(${cols.map(() => '?').join(',')})`;
@@ -500,6 +509,9 @@ export class EloquentBuilder<T extends Model> {
 
     // Private methods
     private async aggregate(functionName: string, column: string): Promise<string> {
+        if (getDbType() === 'mongodb') {
+            return this.aggregateMongo(functionName, column);
+        }
         const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const sql = `SELECT ${functionName.toUpperCase()}(${column}) as agg FROM ${tableName}${where.sql}`;
@@ -575,6 +587,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     private async executeQuery(): Promise<any[]> {
+        if (getDbType() === 'mongodb') return this.executeQueryMongo();
         const tableName = (this.model as typeof Model).getTable();
         const select = this.distinctValue ? 'SELECT DISTINCT' : 'SELECT';
         const columns = this.selectedColumns && this.selectedColumns.length ? this.selectedColumns.join(',') : '*';
@@ -622,6 +635,7 @@ export class EloquentBuilder<T extends Model> {
     }
 
     private async getCount(): Promise<number> {
+        if (getDbType() === 'mongodb') return this.countMongo();
         const tableName = (this.model as typeof Model).getTable();
         const where = this.buildWhereClause();
         const sql = `SELECT COUNT(*) as count FROM ${tableName}${where.sql}`.trim();
@@ -692,17 +706,23 @@ export class EloquentBuilder<T extends Model> {
         const relatedPK = (relatedModel as any).primaryKey as string;
 
         if (rel.type === 'hasOne') {
-            await this.loadHasOne(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            if (getDbType() === 'mongodb') await this.loadHasOneMongo(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            else await this.loadHasOne(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
         } else if (rel.type === 'hasMany') {
-            await this.loadHasMany(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            if (getDbType() === 'mongodb') await this.loadHasManyMongo(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            else await this.loadHasMany(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
         } else if (rel.type === 'belongsTo') {
-            await this.loadBelongsTo(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            if (getDbType() === 'mongodb') await this.loadBelongsToMongo(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            else await this.loadBelongsTo(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
         } else if (rel.type === 'belongsToMany') {
-            await this.loadBelongsToMany(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            if (getDbType() === 'mongodb') await this.loadBelongsToManyMongo(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            else await this.loadBelongsToMany(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
         } else if (rel.type === 'morphOne' || rel.type === 'morphMany') {
-            await this.loadMorphRelations(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            if (getDbType() === 'mongodb') await this.loadMorphRelationsMongo(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
+            else await this.loadMorphRelations(models, relation, rel, relatedModel, relatedTable, relatedPK, options);
         }
     }
+
     private async loadHasOne(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
         const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
@@ -951,6 +971,260 @@ export class EloquentBuilder<T extends Model> {
                 });
                 this.setRelation(m, relation, list);
             });
+        }
+    }
+
+    // ------- Mongo helpers -------
+    private normalizeField(field: string): string {
+        const pk = (this.model as any).primaryKey || 'id';
+        if (field === pk && pk === 'id') return '_id';
+        return field;
+    }
+
+    private coerceId(val: any) {
+        if (val === null || val === undefined) return val;
+        try { return new ObjectId(String(val)); } catch { return val; }
+    }
+
+    private buildMongoFilter(): any {
+        if (!this.whereClauses.length) return {};
+        const andParts: any[] = [];
+        const orParts: any[] = [];
+
+        const toFilter = (w: WhereClause): any => {
+            const op = (w.operator || '=').toLowerCase();
+            const col = this.normalizeField(w.column);
+            if (op === 'nested' && Array.isArray(w.value)) {
+                const nestedClauses = w.value as WhereClause[];
+                const nestedBuilder = new EloquentBuilder<T>(this.model as any);
+                (nestedBuilder as any).whereClauses = nestedClauses;
+                return nestedBuilder.buildMongoFilter();
+            }
+            if (Array.isArray(w.value) && (op === 'in' || op === 'not in')) {
+                const arr = w.value.map(v => col === '_id' ? this.coerceId(v) : v);
+                return { [col]: op === 'in' ? { $in: arr } : { $nin: arr } };
+            }
+            if (Array.isArray(w.value) && (op === 'between' || op === 'not between')) {
+                const [a,b] = w.value;
+                if (op === 'between') return { [col]: { $gte: a, $lte: b } };
+                return { $or: [ { [col]: { $lt: a } }, { [col]: { $gt: b } } ] };
+            }
+            if (w.value === null) {
+                if (op === '=' ) return { [col]: null };
+                if (op === '!=' || op === '<>') return { [col]: { $ne: null } };
+            }
+            // simple ops
+            let v = w.value;
+            if (col === '_id') v = this.coerceId(v);
+            switch (op) {
+                case '=': return { [col]: v };
+                case '!=':
+                case '<>': return { [col]: { $ne: v } };
+                case '>': return { [col]: { $gt: v } };
+                case '>=': return { [col]: { $gte: v } };
+                case '<': return { [col]: { $lt: v } };
+                case '<=': return { [col]: { $lte: v } };
+                case 'like': return { [col]: { $regex: String(v).replace(/%/g, '.*'), $options: 'i' } };
+                default: return { [col]: v };
+            }
+        };
+
+        for (const w of this.whereClauses) {
+            const f = toFilter(w);
+            if (!f || Object.keys(f).length === 0) continue;
+            if ((w.boolean || 'and') === 'or') orParts.push(f);
+            else andParts.push(f);
+        }
+
+        if (orParts.length && andParts.length) return { $and: [ { $and: andParts }, { $or: orParts } ] };
+        if (orParts.length) return { $or: orParts };
+        if (andParts.length) return { $and: andParts };
+        return {};
+    }
+
+    private async executeQueryMongo(): Promise<any[]> {
+        const tableName = (this.model as typeof Model).getTable();
+        const c = mongoCollection(tableName);
+        const filter = this.buildMongoFilter();
+        const proj = this.selectedColumns && this.selectedColumns.length && this.selectedColumns[0] !== '*'
+            ? Object.fromEntries(this.selectedColumns.map(k => [this.normalizeField(k), 1]))
+            : undefined;
+        let cursor = c.find(filter, proj ? { projection: proj } : undefined);
+        if (this.orderByColumn) {
+            cursor = cursor.sort({ [this.normalizeField(this.orderByColumn)]: this.orderByDirection === 'asc' ? 1 : -1 });
+        }
+        if (this.offsetValue !== undefined) cursor = cursor.skip(this.offsetValue);
+        if (this.limitValue !== undefined) cursor = cursor.limit(this.limitValue);
+        const docs = await cursor.toArray();
+        // map _id to id for ORM
+        return docs.map(d => {
+            if (d && d._id && !('id' in d)) d.id = String(d._id);
+            return d;
+        });
+    }
+
+    private async updateMongo(values: Partial<Record<string, any>>): Promise<number> {
+        const tableName = (this.model as typeof Model).getTable();
+        const c = mongoCollection(tableName);
+        const filter = this.buildMongoFilter();
+        let updateDoc: any;
+        if (Object.values(values).some(v => v && typeof v === 'object' && ('$inc' in (v as any) || '$dec' in (v as any)))) {
+            // support increment-like doc
+            updateDoc = {};
+            for (const [k, v] of Object.entries(values)) {
+                if (v && typeof v === 'object' && (v as any).$inc !== undefined) {
+                    updateDoc.$inc = updateDoc.$inc || {}; (updateDoc.$inc as any)[this.normalizeField(k)] = (v as any).$inc;
+                } else if (v && typeof v === 'object' && (v as any).$dec !== undefined) {
+                    updateDoc.$inc = updateDoc.$inc || {}; (updateDoc.$inc as any)[this.normalizeField(k)] = -((v as any).$dec);
+                } else {
+                    updateDoc.$set = updateDoc.$set || {}; (updateDoc.$set as any)[this.normalizeField(k)] = v;
+                }
+            }
+        } else {
+            updateDoc = { $set: Object.fromEntries(Object.entries(values).map(([k,v]) => [this.normalizeField(k), v])) };
+        }
+        const res = await c.updateMany(filter, updateDoc);
+        return Number(res.modifiedCount || 0);
+    }
+
+    private async deleteMongo(): Promise<number> {
+        const tableName = (this.model as typeof Model).getTable();
+        const c = mongoCollection(tableName);
+        const filter = this.buildMongoFilter();
+        const supportsSoft = Boolean((this.model as any).softDeletes);
+        if (supportsSoft) {
+            const res = await c.updateMany(filter, { $set: { deleted_at: new Date() } });
+            return Number(res.modifiedCount || 0);
+        }
+        const res = await c.deleteMany(filter);
+        return Number(res.deletedCount || 0);
+    }
+
+    private async insertMongoMany(rows: Array<Record<string, any>>): Promise<number> {
+        const tableName = (this.model as typeof Model).getTable();
+        const c = mongoCollection(tableName);
+        const docs = rows.map(r => {
+            const d: any = { ...r };
+            if ('id' in d && d.id && !d._id) {
+                try { d._id = new ObjectId(String(d.id)); } catch { d._id = d.id; }
+                delete d.id;
+            }
+            return d;
+        });
+        const res = await c.insertMany(docs);
+        return Object.keys(res.insertedIds || {}).length;
+    }
+
+    private async countMongo(): Promise<number> {
+        const tableName = (this.model as typeof Model).getTable();
+        const c = mongoCollection(tableName);
+        const filter = this.buildMongoFilter();
+        return await c.countDocuments(filter);
+    }
+
+    private async aggregateMongo(fn: string, column: string): Promise<string> {
+        const tableName = (this.model as typeof Model).getTable();
+        const c = mongoCollection(tableName);
+        const filter = this.buildMongoFilter();
+        const field = this.normalizeField(column);
+        const pipeline: any[] = [ { $match: filter } ];
+        const map: any = { count: { $sum: 1 }, sum: { $sum: `$${field}` }, avg: { $avg: `$${field}` }, max: { $max: `$${field}` }, min: { $min: `$${field}` } };
+        const key = fn.toLowerCase();
+        if (key === 'count') return String(await c.countDocuments(filter));
+        pipeline.push({ $group: { _id: null, agg: map[key] } });
+        const res = await c.aggregate(pipeline).toArray();
+        return String((res[0]?.agg ?? 0));
+    }
+
+    // Mongo relation loaders
+    private async loadHasOneMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
+        const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
+        const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
+        const localIds = Array.from(new Set(models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined)));
+        if (!localIds.length) return;
+        const c = mongoCollection(relatedTable);
+        const filter: any = { [foreignKey]: { $in: localIds } };
+        const rows = await c.find(filter).toArray();
+        const byFK = new Map<any, any>();
+        rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); byFK.set(r[foreignKey], r); });
+        models.forEach(m => {
+            const key = (m as any).getAttribute(localKey);
+            const row = byFK.get(key) || null;
+            if (row) {
+                const inst = new (relatedModel as any)();
+                inst.hydrate(row);
+                this.setRelation(m, relation, inst);
+            } else this.setRelation(m, relation, null);
+        });
+    }
+
+    private async loadHasManyMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
+        const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
+        const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
+        const localIds = Array.from(new Set(models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined)));
+        if (!localIds.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        const c = mongoCollection(relatedTable);
+        const rows = await c.find({ [foreignKey]: { $in: localIds } }).toArray();
+        const grouped = new Map<any, any[]>();
+        rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); const k = r[foreignKey]; if (!grouped.has(k)) grouped.set(k, []); grouped.get(k)!.push(r); });
+        models.forEach(m => {
+            const key = (m as any).getAttribute(localKey);
+            const list = (grouped.get(key) || []).map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row); return inst; });
+            this.setRelation(m, relation, list);
+        });
+    }
+
+    private async loadBelongsToMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
+        const foreignKey = rel.foreignKey || `${relation}_id`;
+        const ownerKey = rel.ownerKey || relatedPK || 'id';
+        const foreignIds = Array.from(new Set(models.map(m => (m as any).getAttribute(foreignKey)).filter((v: any) => v !== undefined && v !== null)));
+        if (!foreignIds.length) { models.forEach(m => this.setRelation(m, relation, null)); return; }
+        const c = mongoCollection(relatedTable);
+        const rows = await c.find({ [ownerKey === 'id' ? '_id' : ownerKey]: ownerKey === 'id' ? { $in: foreignIds.map(v => this.coerceId(v)) } : { $in: foreignIds } }).toArray();
+        const map = new Map<any, any>();
+        rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); map.set(ownerKey === 'id' ? String(r._id) : r[ownerKey], r); });
+        models.forEach(m => {
+            const fk = (m as any).getAttribute(foreignKey);
+            const row = map.get(ownerKey === 'id' ? String(fk) : fk) || null;
+            if (row) { const inst = new (relatedModel as any)(); inst.hydrate(row); this.setRelation(m, relation, inst); }
+            else this.setRelation(m, relation, null);
+        });
+    }
+
+    private async loadBelongsToManyMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
+        const pivotTable = rel.table;
+        const parentPK = (this.model as any).primaryKey || 'id';
+        const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
+        const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
+        const parentIds = Array.from(new Set(models.map(m => (m as any).getAttribute(parentPK)).filter((v: any) => v !== undefined && v !== null)));
+        if (!parentIds.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        const pc = mongoCollection(pivotTable);
+        const pivots = await pc.find({ [foreignPivotKey]: { $in: parentIds } }).toArray();
+        const relatedIds = Array.from(new Set(pivots.map((p: any) => p[relatedPivotKey])));
+        if (!relatedIds.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+        const rc = mongoCollection(relatedTable);
+        const rows = await rc.find({ [relatedPK === 'id' ? '_id' : relatedPK]: relatedPK === 'id' ? { $in: relatedIds.map(v => this.coerceId(v)) } : { $in: relatedIds } }).toArray();
+        const rmap = new Map<any, any>();
+        rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); rmap.set(relatedPK === 'id' ? String(r._id) : r[relatedPK], r); });
+        const grouped = new Map<any, any[]>();
+        pivots.forEach((p: any) => { const pid = p[foreignPivotKey]; const rid = p[relatedPivotKey]; if (!grouped.has(pid)) grouped.set(pid, []); const relRow = rmap.get(relatedPK === 'id' ? String(rid) : rid); if (relRow) grouped.get(pid)!.push(relRow); });
+        models.forEach(m => { const pid = (m as any).getAttribute(parentPK); const list = (grouped.get(pid) || []).map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row); return inst; }); this.setRelation(m, relation, list); });
+    }
+
+    private async loadMorphRelationsMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
+        const morphType = rel.morphName || (this.model as typeof Model).getTable();
+        const foreignKey = rel.foreignKey || `${morphType}_id`;
+        const morphTypeKey = rel.morphType || `${morphType}_type`;
+        const localIds = Array.from(new Set(models.map(m => (m as any).getAttribute('id')).filter((v: any) => v !== undefined)));
+        if (!localIds.length) { models.forEach(m => this.setRelation(m, relation, rel.type === 'morphOne' ? null : [])); return; }
+        const c = mongoCollection(relatedTable);
+        const rows = await c.find({ [foreignKey]: { $in: localIds }, [morphTypeKey]: morphType }).toArray();
+        if (rel.type === 'morphOne') {
+            const byFK = new Map<any, any>(); rows.forEach(r => { if (r && r._id && !('id' in r)) r.id = String(r._id); byFK.set(r[foreignKey], r); });
+            models.forEach(m => { const key = (m as any).getAttribute('id'); const row = byFK.get(key) || null; if (row) { const inst = new (relatedModel as any)(); inst.hydrate(row); this.setRelation(m, relation, inst); } else this.setRelation(m, relation, null); });
+        } else {
+            const grouped = new Map<any, any[]>(); rows.forEach(r => { const k = r[foreignKey]; if (r && r._id && !('id' in r)) r.id = String(r._id); if (!grouped.has(k)) grouped.set(k, []); grouped.get(k)!.push(r); });
+            models.forEach(m => { const key = (m as any).getAttribute('id'); const list = (grouped.get(key) || []).map(row => { const inst = new (relatedModel as any)(); inst.hydrate(row); return inst; }); this.setRelation(m, relation, list); });
         }
     }
 }

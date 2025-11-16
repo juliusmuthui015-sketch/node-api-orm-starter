@@ -1,8 +1,8 @@
-import Schema, { TableBuilder } from '../Schema';
+import type { MigrationSchema, TableBuilder } from '../Schema';
 
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 
-module.exports.up = async function(schema: Schema, _query: QueryFn) {
+module.exports.up = async function(schema: MigrationSchema, _query: QueryFn) {
   return schema.createTable('permissions', (table: TableBuilder) => {
     table.increments('id');
     table.string('name', 191).notNullable();
@@ -15,6 +15,6 @@ module.exports.up = async function(schema: Schema, _query: QueryFn) {
   });
 };
 
-module.exports.down = async function(schema: Schema, _query: QueryFn) {
+module.exports.down = async function(schema: MigrationSchema, _query: QueryFn) {
   return schema.dropTable('permissions');
 };

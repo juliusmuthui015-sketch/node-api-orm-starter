@@ -1,11 +1,11 @@
-import Schema, { TableBuilder } from '../Schema';
+import type { MigrationSchema, TableBuilder } from '../Schema';
 import {EUserType} from "@/server/enums";
 import {UserProfile} from "@/server/Models/User";
 
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 
 // Migration: user_profile
-module.exports.up = async function(schema: Schema, query: QueryFn) {
+module.exports.up = async function(schema: MigrationSchema, query: QueryFn) {
   return schema.createTable(UserProfile.getTable(), (table: TableBuilder) => {
     table.increments('id');
     table.enum('gender', ['male', 'female', 'other']).notNullable();
@@ -23,7 +23,7 @@ module.exports.up = async function(schema: Schema, query: QueryFn) {
   });
 };
 
-module.exports.down = async function(schema: Schema, query: QueryFn) {
+module.exports.down = async function(schema: MigrationSchema, query: QueryFn) {
   // Drop the table on rollback
   return schema.dropTable(UserProfile.getTable());
 };

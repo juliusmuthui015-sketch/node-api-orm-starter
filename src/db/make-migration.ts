@@ -39,13 +39,13 @@ const filePath = path.join(dir, fileName);
 
 let template: string;
 if (alter && table) {
-  template = `import Schema, { TableBuilder } from '../Schema';
+  template = `import type { MigrationSchema, TableBuilder } from '../Schema';
 
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 
 // Migration: ${name}
 // Alter table ${table}
-module.exports.up = async function(schema: Schema, query: QueryFn) {
+module.exports.up = async function(schema: MigrationSchema, query: QueryFn) {
   // Use schema.alterTable to perform ALTER TABLE statements
   return schema.alterTable('${table}', (table: TableBuilder) => {
     // add a column:
@@ -66,7 +66,7 @@ module.exports.up = async function(schema: Schema, query: QueryFn) {
   });
 };
 
-module.exports.down = async function(schema: Schema, query: QueryFn) {
+module.exports.down = async function(schema: MigrationSchema, query: QueryFn) {
   // Provide reverse operations for rollback if possible. Example: remove added columns or recreate dropped columns.
   return schema.alterTable('${table}', (table: TableBuilder) => {
     // reverse operations here
@@ -75,12 +75,12 @@ module.exports.down = async function(schema: Schema, query: QueryFn) {
 `;
 } else {
   const tbl = table || name.replace(/[^a-z0-9_]/gi, '_').toLowerCase();
-  template = `import Schema, { TableBuilder } from '../Schema';
+  template = `import type { MigrationSchema, TableBuilder } from '../Schema';
 
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 
 // Migration: ${name}
-module.exports.up = async function(schema: Schema, query: QueryFn) {
+module.exports.up = async function(schema: MigrationSchema, query: QueryFn) {
   return schema.createTable('${tbl}', (table: TableBuilder) => {
     table.increments('id');
     table.string('name', 191).notNullable();
@@ -96,7 +96,7 @@ module.exports.up = async function(schema: Schema, query: QueryFn) {
   });
 };
 
-module.exports.down = async function(schema: Schema, query: QueryFn) {
+module.exports.down = async function(schema: MigrationSchema, query: QueryFn) {
   // Drop the table on rollback
   return schema.dropTable('${tbl}');
 };

@@ -2,8 +2,9 @@
 import { ModelAttributes, RelationshipConfig, Casts } from './types';
 import { EloquentBuilder } from './EloquentBuilder';
 import { HasOne, HasMany, BelongsTo, BelongsToMany } from './relationships';
-import { query as dbQuery } from '@/config/db.config';
+import { query as dbQuery, getDbType, collection as mongoCollection } from '@/config/db.config';
 import util from 'util';
+import { ObjectId } from 'mongodb';
 
 // Add this interface for type safety
 export interface ToJSONOptions {
@@ -558,10 +559,36 @@ export abstract class Model {
         const attrs = { ...this.attributes } as any;
         const id = attrs[primaryKey];
         const exists = this.__exists; // whether record already persisted
+        const isMongo = getDbType() === 'mongodb';
 
-        // Decide insert vs update:
-        // Insert if not existing OR force option OR (no id and autoIncrement)
+        // Decide insert vs update
         const doInsert = !exists || options.force || (id === undefined && (staticClass as any).autoIncrement);
+
+        if (isMongo) {
+            const c = mongoCollection(table);
+            if (doInsert) {
+                const doc: any = { ...attrs };
+                if (primaryKey === 'id') {
+                    if (doc.id) {
+                        try { doc._id = new ObjectId(String(doc.id)); } catch { doc._id = doc.id; }
+                        delete doc.id;
+                    }
+                }
+                const res = await c.insertOne(doc);
+                if (primaryKey === 'id') this.setAttribute('id', String(res.insertedId));
+                this.__exists = true;
+            } else {
+                const dirty = this.getDirty();
+                const setDoc: any = {};
+                Object.keys(dirty).forEach(k => { if (k === primaryKey && primaryKey === 'id') return; setDoc[k] = dirty[k]; });
+                if (Object.keys(setDoc).length) {
+                    const filter: any = primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id };
+                    await c.updateOne(filter, { $set: setDoc });
+                }
+            }
+            this.original = { ...this.attributes };
+            return this;
+        }
 
         if (doInsert) {
             // INSERT path
@@ -602,6 +629,18 @@ export abstract class Model {
         const id = this.getAttribute(primaryKey);
         if (id === undefined || id === null) return false;
 
+        if (getDbType() === 'mongodb') {
+            const c = mongoCollection(table);
+            if ((staticClass as any).softDeletes && !force) {
+                await c.updateOne(primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id }, { $set: { deleted_at: new Date() } });
+                this.setAttribute('deleted_at', new Date());
+                return true;
+            } else {
+                await c.deleteOne(primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id });
+                return true;
+            }
+        }
+
         if ((staticClass as any).softDeletes && !force) {
             const now = new Date();
             this.setAttribute('deleted_at', now);
@@ -625,6 +664,13 @@ export abstract class Model {
         if (id === undefined || id === null) return false;
 
         this.setAttribute('deleted_at', null);
+
+        if (getDbType() === 'mongodb') {
+            const c = mongoCollection(table);
+            await c.updateOne(primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id }, { $set: { deleted_at: null } });
+            return true;
+        }
+
         const sql = `UPDATE ${table} SET deleted_at = NULL WHERE ${primaryKey} = ?`;
         await dbQuery<any>(sql, [id]);
         return true;
