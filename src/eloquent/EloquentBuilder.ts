@@ -849,6 +849,62 @@ export class EloquentBuilder<T extends Model> {
     }
 
     private async loadBelongsToMany(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
+        // SQL implementation (no Mongo calls). Mongo handled separately in loadBelongsToManyMongo.
+        const pivotTable = rel.table;
+        const parentPK = (this.model as any).primaryKey || 'id';
+        const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
+        const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
+        const parentIds = Array.from(new Set(models.map(m => (m as any).getAttribute(parentPK)).filter((v: any) => v !== undefined && v !== null)));
+        if (!parentIds.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+
+        const parentPlaceholders = parentIds.map(() => '?').join(',');
+        let pivotSql = `SELECT ${foreignPivotKey} AS parent_id, ${relatedPivotKey} AS related_id FROM ${pivotTable} WHERE ${foreignPivotKey} IN (${parentPlaceholders})`;
+        const pivotParams: any[] = [...parentIds];
+
+        // Apply constraints to related rows after pivot fetch (not to pivot query itself)
+        const pivotRows = await dbQuery<any>(pivotSql, pivotParams);
+        if (!pivotRows.length) { models.forEach(m => this.setRelation(m, relation, [])); return; }
+
+        const relatedIds = Array.from(new Set(pivotRows.map((r: any) => r.related_id)));
+        const relatedPlaceholders = relatedIds.map(() => '?').join(',');
+        let relatedSql = `SELECT * FROM ${relatedTable} WHERE ${relatedPK} IN (${relatedPlaceholders})`;
+        const relatedParams: any[] = [...relatedIds];
+
+        // Constraints: use builder to build WHERE on related table
+        if (options.constraints) {
+            const constraintBuilder = new EloquentBuilder(relatedModel);
+            options.constraints(constraintBuilder);
+            const constraintWhere = (constraintBuilder as any).buildWhereClause();
+            if (constraintWhere.sql) {
+                // constraintWhere.sql already starts with ' WHERE', so replace with AND for existing WHERE
+                relatedSql += constraintWhere.sql.replace('WHERE', 'AND');
+                relatedParams.push(...constraintWhere.params);
+            }
+        }
+
+        const relatedRows = await dbQuery<any>(relatedSql, relatedParams);
+        const relatedMap = new Map<any, any>();
+        relatedRows.forEach(r => relatedMap.set(r[relatedPK], r));
+
+        const grouped = new Map<any, any[]>();
+        pivotRows.forEach(p => {
+            const relRow = relatedMap.get(p.related_id);
+            if (!grouped.has(p.parent_id)) grouped.set(p.parent_id, []);
+            if (relRow) {
+                const inst = new (relatedModel as any)();
+                inst.hydrate(relRow);
+                grouped.get(p.parent_id)!.push(inst);
+            }
+        });
+
+        models.forEach(m => {
+            const pid = (m as any).getAttribute(parentPK);
+            const list = grouped.get(pid) || [];
+            this.setRelation(m, relation, list);
+        });
+    }
+
+    private async loadBelongsToManyMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const pivotTable = rel.table;
         const parentPK = (this.model as any).primaryKey || 'id';
         const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
@@ -1305,7 +1361,7 @@ export class EloquentBuilder<T extends Model> {
         });
     }
 
-    private async loadBelongsToManyMongo(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
+    private async loadBelongsToManyMongo_(models: T[], relation: string, rel: any, relatedModel: typeof Model, relatedTable: string, relatedPK: string, options: EagerLoadOptions): Promise<void> {
         const pivotTable = rel.table;
         const parentPK = (this.model as any).primaryKey || 'id';
         const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
