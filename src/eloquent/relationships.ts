@@ -2,6 +2,19 @@
 import { Model } from './Model';
 import { EloquentBuilder } from './EloquentBuilder';
 import { query as dbQuery, getDbType, collection as mongoCollection } from '@/config/db.config';
+import { ObjectId } from 'mongodb';
+
+// Helper: coerce 24-hex strings to ObjectId when writing *_id fields in Mongo
+const toObjectIdIfHex = (v: any) => {
+    if (v === null || v === undefined) return v;
+    if (v instanceof ObjectId) return v;
+    const s = String(v);
+    if (/^[0-9a-fA-F]{24}$/.test(s)) {
+        try { return new ObjectId(s); } catch { /*noop*/ }
+    }
+    return v;
+};
+const coerceFK = (field: string, value: any) => /_id$/i.test(field) ? toObjectIdIfHex(value) : value;
 
 export abstract class Relation<T extends Model> {
     protected query: EloquentBuilder<T>;
@@ -220,17 +233,6 @@ export class HasMany<T extends Model> extends Relation<T> {
         return model;
     }
 
-    async saveMany(models: T[]): Promise<T[]> {
-        const foreignValue = (this.parent as any).getAttribute(this.localKey);
-
-        for (const model of models) {
-            (model as any).setAttribute(this.foreignKey, foreignValue);
-            await (model as any).save();
-        }
-
-        return models;
-    }
-
     // Collection management
     async attach(model: T | number | string): Promise<void> {
         const dbType = getDbType();
@@ -249,7 +251,16 @@ export class HasMany<T extends Model> extends Relation<T> {
         const foreignValue = (this.parent as any).getAttribute(this.localKey);
         if (dbType === 'mongodb') {
             const c = mongoCollection((this.relatedModel as typeof Model).getTable());
-            await c.updateOne({ [(this.relatedModel as any).primaryKey || 'id']: relatedId } as any, { $set: { [this.foreignKey]: foreignValue } });
+            const pk = (this.relatedModel as any).primaryKey || 'id';
+            let filter: any;
+            if (pk === 'id') {
+                const s = String(relatedId);
+                try { filter = { _id: new (require('mongodb').ObjectId)(s) }; } catch { filter = { _id: s }; }
+            } else {
+                filter = { [pk]: relatedId } as any;
+            }
+            const fkValue = coerceFK(this.foreignKey, foreignValue);
+            await c.updateOne(filter, { $set: { [this.foreignKey]: fkValue } });
             return;
         }
         await dbQuery(
@@ -266,7 +277,7 @@ export class HasMany<T extends Model> extends Relation<T> {
             // Detach all
             if (dbType === 'mongodb') {
                 const c = mongoCollection((this.relatedModel as typeof Model).getTable());
-                const res = await c.updateMany({ [this.foreignKey]: foreignValue } as any, { $set: { [this.foreignKey]: null } });
+                const res = await c.updateMany({ [this.foreignKey]: coerceFK(this.foreignKey, foreignValue) } as any, { $set: { [this.foreignKey]: null } });
                 return Number(res.modifiedCount || 0);
             }
             return await this.query
@@ -284,7 +295,15 @@ export class HasMany<T extends Model> extends Relation<T> {
 
         if (dbType === 'mongodb') {
             const c = mongoCollection((this.relatedModel as typeof Model).getTable());
-            const res = await c.updateOne({ [(this.relatedModel as any).primaryKey || 'id']: relatedId, [this.foreignKey]: foreignValue } as any, { $set: { [this.foreignKey]: null } });
+            const pk = (this.relatedModel as any).primaryKey || 'id';
+            let filter: any;
+            if (pk === 'id') {
+                const s = String(relatedId);
+                try { filter = { _id: new (require('mongodb').ObjectId)(s), [this.foreignKey]: coerceFK(this.foreignKey, foreignValue) } } catch { filter = { _id: s, [this.foreignKey]: coerceFK(this.foreignKey, foreignValue) } }
+            } else {
+                filter = { [pk]: relatedId, [this.foreignKey]: coerceFK(this.foreignKey, foreignValue) } as any;
+            }
+            const res = await c.updateOne(filter, { $set: { [this.foreignKey]: null } });
             return Number(res.modifiedCount || 0);
         }
         return await dbQuery(
@@ -434,17 +453,31 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
 
         if (getDbType() === 'mongodb') {
             const pc = mongoCollection(this.pivotTable);
-            const pivotFilter: any = { [this.foreignPivotKey]: parentId };
-            this.pivotWheres.forEach(w => { Object.assign(pivotFilter, { [w.column]: { ['$' + (w.operator === '=' ? 'eq' : w.operator === '!=' ? 'ne' : 'eq')]: w.value } }); });
+            const pidStr = String(parentId);
+            const pidNum = parseInt(pidStr, 10);
+            const parentMatch: any[] = isNaN(pidNum) ? [pidStr] : [pidStr, pidNum];
+            const pivotFilter: any = { [this.foreignPivotKey]: { $in: parentMatch } };
+            this.pivotWheres.forEach(w => {
+                const op = (w.operator || '=').toLowerCase();
+                const m = op === '!=' || op === '<>' ? '$ne' : op === 'in' ? '$in' : op === 'not in' ? '$nin' : '$eq';
+                Object.assign(pivotFilter, { [w.column]: { [m]: w.value } });
+            });
             const pivots = await pc.find(pivotFilter).toArray();
             if (!pivots.length) return [];
-            const relatedIds = pivots.map((r: any) => r[this.relatedPivotKey]);
+            const relatedIds = pivots.map((r: any) => String(r[this.relatedPivotKey]));
             const rc = mongoCollection((this.relatedModel as typeof Model).getTable());
-            const docs = await rc.find({ [this.relatedPrimaryKey === 'id' ? 'id' : this.relatedPrimaryKey]: { $in: relatedIds } } as any).toArray();
-            const pivotMap = new Map(pivots.map((r: any) => [r[this.relatedPivotKey], r]));
+            const useObjectId = this.relatedPrimaryKey === 'id';
+            const filter: any = useObjectId
+                ? { _id: { $in: relatedIds.map((v: any) => { try { return new ObjectId(String(v)); } catch { return v; } }) } }
+                : { [this.relatedPrimaryKey]: { $in: relatedIds } };
+            const docs = await rc.find(filter).toArray();
+            // map _id to id for ORM
+            docs.forEach(d => { if (d && d._id && !('id' in d)) d.id = String(d._id); });
+            const pivotMap = new Map(pivots.map((r: any) => [String(r[this.relatedPivotKey]), r]));
             return docs.map(row => {
                 const instance = new (this.relatedModel as any)(row) as T;
-                const pivotData = pivotMap.get((row as any)[this.relatedPrimaryKey]);
+                const key = String((row as any)[this.relatedPrimaryKey]);
+                const pivotData = pivotMap.get(key);
                 if (pivotData) (instance as any).pivot = this.createPivot(pivotData);
                 return instance;
             });
@@ -528,9 +561,11 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
 
             if (isMongo) {
                 const pc = mongoCollection(this.pivotTable);
+                const pid = coerceFK(this.foreignPivotKey, parentId);
+                const rid = coerceFK(this.relatedPivotKey, actualRelatedId);
                 await pc.updateOne(
-                    { [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: actualRelatedId } as any,
-                    { $set: { ...pivotData, [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: actualRelatedId } },
+                    { [this.foreignPivotKey]: pid, [this.relatedPivotKey]: rid } as any,
+                    { $set: { ...pivotData, [this.foreignPivotKey]: pid, [this.relatedPivotKey]: rid } },
                     { upsert: true }
                 );
                 continue;
@@ -561,11 +596,25 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
 
         if (isMongo) {
             const pc = mongoCollection(this.pivotTable);
+            const parentForms: any[] = (() => {
+                const s = String(parentId);
+                const list: any[] = [coerceFK(this.foreignPivotKey, parentId), s];
+                const n = parseInt(s, 10); if (!isNaN(n)) list.push(n);
+                if (/^[0-9a-fA-F]{24}$/.test(s)) { try { list.push(new ObjectId(s)); } catch {} }
+                return Array.from(new Set(list.map(x => x instanceof ObjectId ? x : String(x)))).map(x => (typeof x === 'string' && /^[0-9a-fA-F]{24}$/.test(x) ? new ObjectId(x) : x));
+            })();
             if (relatedIds && relatedIds.length > 0) {
-                const res = await pc.deleteMany({ [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: { $in: relatedIds } } as any);
+                const relForms = Array.from(new Set(relatedIds.flatMap(id => {
+                    const s = String(id);
+                    const arr: any[] = [coerceFK(this.relatedPivotKey, id), s];
+                    const n = parseInt(s, 10); if (!isNaN(n)) arr.push(n);
+                    if (/^[0-9a-fA-F]{24}$/.test(s)) { try { arr.push(new ObjectId(s)); } catch {} }
+                    return arr;
+                })));
+                const res = await pc.deleteMany({ [this.foreignPivotKey]: { $in: parentForms }, [this.relatedPivotKey]: { $in: relForms } } as any);
                 return Number(res.deletedCount || 0);
             }
-            const res = await pc.deleteMany({ [this.foreignPivotKey]: parentId } as any);
+            const res = await pc.deleteMany({ [this.foreignPivotKey]: { $in: parentForms } } as any);
             return Number(res.deletedCount || 0);
         }
 
@@ -594,8 +643,9 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
         let currentIdsSet = new Set<any>();
         if (isMongo) {
             const pc = mongoCollection(this.pivotTable);
-            const rows = await pc.find({ [this.foreignPivotKey]: parentId } as any).project({ [this.relatedPivotKey]: 1, _id: 0 }).toArray();
-            currentIdsSet = new Set(rows.map((r: any) => r[this.relatedPivotKey]));
+            const pidVal = coerceFK(this.foreignPivotKey, parentId);
+            const rows = await pc.find({ [this.foreignPivotKey]: pidVal } as any).project({ [this.relatedPivotKey]: 1, _id: 0 }).toArray();
+            currentIdsSet = new Set(rows.map((r: any) => String(r[this.relatedPivotKey])));
         } else {
             const currentPivotRows = await dbQuery<any>(
                 `SELECT ${this.relatedPivotKey} FROM ${this.pivotTable} WHERE ${this.foreignPivotKey} = ?`,
@@ -621,12 +671,14 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
                 delete extraData[this.relatedPrimaryKey];
             }
 
-            newIds.add(actualId);
+            newIds.add(String(actualId));
 
-            if (currentIdsSet.has(actualId)) {
+            if (currentIdsSet.has(String(actualId))) {
                 if (Object.keys(extraData).length > 0) {
                     if (isMongo) {
-                        await mongoCollection(this.pivotTable).updateOne({ [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: actualId } as any, { $set: extraData });
+                        const pidVal = coerceFK(this.foreignPivotKey, parentId);
+                        const ridVal = coerceFK(this.relatedPivotKey, actualId);
+                        await mongoCollection(this.pivotTable).updateOne({ [this.foreignPivotKey]: pidVal, [this.relatedPivotKey]: ridVal } as any, { $set: extraData });
                     } else {
                         const setSql = Object.keys(extraData).map(k => `${k} = ?`).join(', ');
                         await dbQuery(
@@ -644,7 +696,7 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
 
         if (detaching) {
             for (const currentId of currentIdsSet) {
-                if (!newIds.has(currentId)) {
+                if (!newIds.has(String(currentId))) {
                     await this.detach([currentId]);
                     detached.push(currentId);
                 }
@@ -666,7 +718,9 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
         let currentRows: any[] = [];
         if (isMongo) {
             const pc = mongoCollection(this.pivotTable);
-            currentRows = await pc.find({ [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: { $in: toCheck } } as any).project({ [this.relatedPivotKey]: 1, _id: 0 }).toArray();
+            const pidVal = coerceFK(this.foreignPivotKey, parentId);
+            const relList = Array.from(new Set(toCheck.flatMap(id => { const s = String(id); const arr: any[] = [coerceFK(this.relatedPivotKey, id), s]; const n = parseInt(s,10); if (!isNaN(n)) arr.push(n); if (/^[0-9a-fA-F]{24}$/.test(s)) { try { arr.push(new ObjectId(s)); } catch {} } return arr; })));
+            currentRows = await pc.find({ [this.foreignPivotKey]: pidVal, [this.relatedPivotKey]: { $in: relList } } as any).project({ [this.relatedPivotKey]: 1, _id: 0 }).toArray();
         } else {
             const placeholders = relatedIds.map(() => '?').join(',');
             currentRows = await dbQuery<any>(
@@ -676,10 +730,10 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
             );
         }
 
-        const currentIds = new Set(currentRows.map((r: any) => r[this.relatedPivotKey]));
+        const currentIds = new Set(currentRows.map((r: any) => String(r[this.relatedPivotKey])));
 
-        const toAttach = relatedIds.filter(id => !currentIds.has(id));
-        const toDetach = relatedIds.filter(id => currentIds.has(id));
+        const toAttach = relatedIds.filter(id => !currentIds.has(String(id)));
+        const toDetach = relatedIds.filter(id => currentIds.has(String(id)));
 
         if (toAttach.length > 0) {
             await this.attach(toAttach);
@@ -701,7 +755,9 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
         const isMongo = getDbType() === 'mongodb';
 
         if (isMongo) {
-            const res = await mongoCollection(this.pivotTable).updateOne({ [this.foreignPivotKey]: parentId, [this.relatedPivotKey]: relatedId } as any, { $set: attributes });
+            const pidStr = String(parentId);
+            const ridStr = String(relatedId);
+            const res = await mongoCollection(this.pivotTable).updateOne({ [this.foreignPivotKey]: pidStr, [this.relatedPivotKey]: ridStr } as any, { $set: attributes });
             return Number(res.modifiedCount || 0);
         }
 
@@ -904,4 +960,3 @@ export class MorphTo<T extends Model> extends Relation<T> {
         return await this.query.first();
     }
 }
-
