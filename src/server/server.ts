@@ -6,12 +6,16 @@ import path from "path";
 // Resolve .env relative to this compiled file's directory so it works both in TS and built JS
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+// Load global auto-imports (models, cache helpers, auth helpers)
+import '@/global/autoload';
+
 // Import database after loading env so top-level DB config reads the populated process.env
 import { initDatabase, query as _dbQuery } from "@/config/db.config";
 import '@/server/Providers/providers';
 import apiRouter from '@/server/routes';
 import { asyncContextMiddleware } from './middleware/asyncContext';
 import requestLoggerMiddleware from './middleware/requestLogger';
+import { initCache } from '@/cache';
 
 const app: Application = express();
 
@@ -45,6 +49,19 @@ async function bootstrap() {
       await initDatabase();
       console.log("Database connection established");
       await autoSyncPermissionsIfEnabled();
+    }
+
+    // initialize cache (driver selected via CACHE_DRIVER in .env). Set SKIP_CACHE=1 to skip.
+    const skipCache = String(process.env.SKIP_CACHE || '').toLowerCase();
+    if (skipCache === '1' || skipCache === 'true') {
+      console.warn('SKIP_CACHE is set — skipping cache initialization');
+    } else {
+      try {
+        await initCache();
+        console.log(`Cache initialized (driver=${process.env.CACHE_DRIVER || 'file'})`);
+      } catch (e) {
+        console.error('Cache initialization failed:', e);
+      }
     }
 
     // mount middleware
