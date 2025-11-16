@@ -29,6 +29,7 @@ export abstract class Model {
     static timestamps: boolean = true;
     static softDeletes: boolean = false;
     static relationships: { [key: string]: RelationshipConfig } = {};
+    static autoIncrement: boolean = true;
 
     id?: number | string;
     created_at?: Date;
@@ -38,6 +39,7 @@ export abstract class Model {
     protected attributes: ModelAttributes = {};
     protected original: ModelAttributes = {};
     protected relationshipsLoaded: { [key: string]: any } = {};
+    protected __exists: boolean = false;
 
     constructor(attributes: ModelAttributes = {}) {
         this.fill(attributes);
@@ -89,6 +91,7 @@ export abstract class Model {
             this.setAttribute(key, attributes[key]);
         });
         this.original = { ...this.attributes };
+        this.__exists = true; // mark as existing (hydrated from DB)
         return this;
     }
 
@@ -540,7 +543,7 @@ export abstract class Model {
 
     // Enhanced persistence methods
     async save(options: { force?: boolean } = {}): Promise<this> {
-        const staticClass = this.constructor as typeof Model & { table: string; primaryKey: string; timestamps?: boolean };
+        const staticClass = this.constructor as typeof Model & { table: string; primaryKey: string; timestamps?: boolean; autoIncrement?: boolean };
         const table = staticClass.getTable();
         const primaryKey = staticClass.primaryKey || 'id';
         const now = new Date();
@@ -554,20 +557,25 @@ export abstract class Model {
 
         const attrs = { ...this.attributes } as any;
         const id = attrs[primaryKey];
+        const exists = this.__exists; // whether record already persisted
 
-        if (id === undefined || id === null || options.force) {
-            // INSERT or forced update
-            const insertCols = Object.keys(attrs).filter(k => attrs[k] !== undefined && k !== primaryKey);
+        // Decide insert vs update:
+        // Insert if not existing OR force option OR (no id and autoIncrement)
+        const doInsert = !exists || options.force || (id === undefined && (staticClass as any).autoIncrement);
+
+        if (doInsert) {
+            // INSERT path
+            const insertCols = Object.keys(attrs).filter(k => attrs[k] !== undefined && (k !== primaryKey || !(staticClass as any).autoIncrement));
             const placeholders = insertCols.map(() => '?').join(',');
             const sql = `INSERT INTO ${table} (${insertCols.join(',')}) VALUES (${placeholders})`;
             const params = insertCols.map(c => attrs[c]);
             const result: any = await dbQuery<any>(sql, params);
-            const insertId = result.insertId;
-            if (insertId !== undefined) {
-                this.setAttribute(primaryKey, insertId);
+            if ((staticClass as any).autoIncrement && result && result.insertId !== undefined) {
+                this.setAttribute(primaryKey, result.insertId);
             }
+            this.__exists = true;
         } else {
-            // UPDATE
+            // UPDATE path
             const dirty = this.getDirty();
             const setCols = Object.keys(dirty).filter(k => k !== primaryKey);
             if (setCols.length) {
