@@ -14,7 +14,10 @@
     "test:lock": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/test-lock.ts",
     "seed": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/seeders/seed.ts",
     "sync:permissions": "ts-node-dev -r tsconfig-paths/register --transpile-only src/db/seeders/sync-permissions.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "cache:cli": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tools/cache-cli.ts",
+    "smoke:redis": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tmp/redis-cache-smoke.ts",
+    "key:generate": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tools/key-generate.ts"
   },
   "keywords": [],
   "author": "",
@@ -28,15 +31,20 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
-    "mysql2": "^3.15.3"
+    "mysql2": "^3.15.3",
+    "redis": "^5.9.0",
+    "yargs": "^17.7.2"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
     "@types/node": "^24.10.1",
+    "@types/yargs": "^17.0.33",
     "ts-node-dev": "^2.0.0",
     "tsc-alias": "^1.8.16",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "unimport": "^5.5.0",
+    "unplugin-auto-import": "^20.2.0"
   }
 }
