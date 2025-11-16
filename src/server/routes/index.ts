@@ -1,7 +1,7 @@
-import AuthController from '@/server/controllers/AuthController';
-import UserController from '@/server/controllers/UserController';
-import RoleController from '@/server/controllers/RoleController';
-import PermissionController from '@/server/controllers/PermissionController';
+import AuthController from '@/server/controllers/User/AuthController';
+import UserController from '@/server/controllers/User/UserController';
+import RoleController from '@/server/controllers/User/RoleController';
+import PermissionController from '@/server/controllers/User/PermissionController';
 import RouterBuilder from "@/eloquent/Router/router";
 
 // Use middleware aliases (strings) resolved by middlewareConfig via RouterBuilder

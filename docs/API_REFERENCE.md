@@ -109,18 +109,18 @@ export default class UserService {
 
 ```ts
 import RouterBuilder from '@/eloquent/Router/router';
-import UserController from '@/server/controllers/UserController';
+import UserController from './UserController';
 
 const rb = new RouterBuilder();
 
 rb.prefix('/api').middleware('auth').group(api => {
-  api.prefix('/users').group(users => {
-    users.get('/', 'can:view_users', UserController.index);
-    users.get('/:id', 'can:view_users', UserController.show);
-    users.post('/', 'can:create_users', UserController.store);
-    users.put('/:id', 'can:update_users', UserController.update);
-    users.delete('/:id', 'can:delete_users', UserController.destroy);
-  });
+    api.prefix('/users').group(users => {
+        users.get('/', 'can:view_users', UserController.index);
+        users.get('/:id', 'can:view_users', UserController.show);
+        users.post('/', 'can:create_users', UserController.store);
+        users.put('/:id', 'can:update_users', UserController.update);
+        users.delete('/:id', 'can:delete_users', UserController.destroy);
+    });
 });
 
 export default rb.build();
