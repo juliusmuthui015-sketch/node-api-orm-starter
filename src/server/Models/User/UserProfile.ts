@@ -8,7 +8,7 @@ export class UserProfile extends Model {
         , "created_at", "updated_at", "deleted_at"];
     static hidden: string[] = [];
     static casts = {
-        id: 'int',
+        // id: 'int',
         gender: 'string',
         type: 'string',
         id_number: 'string',

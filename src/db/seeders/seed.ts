@@ -47,10 +47,10 @@ export async function seed() {
     let existing = await Permission.where('slug', p.slug).first();
     if (existing) {
       await existing.update({ name: p.name, description: p.description || '', updated_at: now });
-      permIds.push(existing.id as number);
+      permIds.push(existing.id as any);
     } else {
       const created = await Permission.create({ name: p.name, slug: p.slug, description: p.description || '', created_at: now, updated_at: now });
-      permIds.push((created as any).id as number);
+      permIds.push((created as any).id as any);
     }
   }
 
@@ -58,22 +58,22 @@ export async function seed() {
   let admin = await User.where('email', 'admin@example.com').first();
   if (!admin) {
     admin = await User.create({ name: 'Admin', email: 'admin@example.com', password: await bcrypt.hash('password', 10), active_status: 1, created_at: now, updated_at: now });
-    await admin.profile().create({ user_id: admin.id as number, gender: 'male', type: 'admin', created_at: now, updated_at: now });
+    await admin.profile().create({ user_id: admin.id as any, gender: 'male', type: 'admin', created_at: now, updated_at: now });
   }
 
   // Ensure regular user exists
   let existingUser = await User.where('email', 'user@example.com').first();
   if (!existingUser) {
     existingUser = await User.create({ name: 'User', email: 'user@example.com', password: await bcrypt.hash('password', 10), active_status: 1, created_at: now, updated_at: now });
-    await existingUser.profile().create({ user_id: existingUser.id as number, gender: 'male', type: EUserType.TENANT, created_at: now, updated_at: now });
+    await existingUser.profile().create({ user_id: existingUser.id as any, gender: 'male', type: EUserType.TENANT, created_at: now, updated_at: now });
   }
 
   // Attach admin role to admin user
   try {
-    await (admin as any).roles().sync([adminRole.id as number]);
+    await (admin as any).roles().sync([adminRole.id as any]);
   } catch (e) {
     // fallback to attach if sync not supported in this environment
-    await (admin as any).roles().attach(adminRole.id as number);
+    await (admin as any).roles().attach(adminRole.id as any);
   }
 
   // Attach all permissions to admin role

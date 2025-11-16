@@ -5,7 +5,7 @@ export class Permission extends Model {
   static fillable = ["name", "slug", "description", "created_at", "updated_at", "deleted_at"];
   static hidden: string[] = [];
   static casts = {
-    id: 'int',
+    // id: 'int',
     created_at: 'datetime',
     updated_at: 'datetime',
     deleted_at: 'datetime'

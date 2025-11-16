@@ -12,7 +12,7 @@ export class User extends Model {
     ];
     static hidden = ['password', 'remember_token'];
     static casts = {
-        id: 'int',
+        // id: 'int',
         active_status: 'int',
         dark_mode: 'int',
         created_at: 'datetime',
