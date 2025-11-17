@@ -15,6 +15,7 @@ import '@/server/Providers/providers';
 import apiRouter from '@/server/routes';
 import { asyncContextMiddleware } from './middleware/asyncContext';
 import requestLoggerMiddleware from './middleware/requestLogger';
+import validatorMiddleware from './middleware/validatorMiddleware';
 import { initCache } from '@/cache';
 
 const app: Application = express();
@@ -68,6 +69,8 @@ async function bootstrap() {
     app.use(asyncContextMiddleware);
     // Log incoming requests to the terminal (method, url, status, duration, ip, user)
     app.use(requestLoggerMiddleware);
+    // Attach request.validate helper
+    app.use(validatorMiddleware);
 
     // mount consolidated Laravel-style routes
     app.use(apiRouter);
