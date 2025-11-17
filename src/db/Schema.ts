@@ -170,6 +170,8 @@ export class TableBuilder {
   char(name: string, length = 191) { return this.column('CHAR', name, length); }
   text(name: string) { return this.column('TEXT', name); }
   longText(name: string) { return this.column('LONGTEXT', name); }
+  // JSON column helper (length accepted for API compatibility but ignored in SQL)
+  json(name: string, _length?: number) { return this.column('JSON', name); }
   datetime(name: string) { return this.column('DATETIME', name); }
   timestamp(name: string) { const c = this.column('TIMESTAMP', name); c.nullable(); return c; }
 
