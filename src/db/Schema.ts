@@ -34,11 +34,13 @@ export class Column {
   primaryFlag = false;
   autoIncrementFlag = false;
   commentText?: string;
+  decimalPlaces?: number;
 
-  constructor(name: string, type: string, length?: number) {
+  constructor(name: string, type: string, length?: number,decimalPlaces=2) {
     this.name = name;
     this.type = type;
     this.length = length;
+    this.decimalPlaces = decimalPlaces;
   }
 
   // set enum values for ENUM columns
@@ -63,6 +65,8 @@ export class Column {
       sqlType += `(${this.length})`;
     } else if (this.length !== undefined && (this.type.toLowerCase() === 'int')) {
       sqlType += `(${this.length})`;
+    } else if (this.length !== undefined && (this.type.toLowerCase() === 'decimal')) {
+      sqlType += `(${this.length},${this.decimalPlaces})`;
     }
 
     if (this.unsignedFlag) sqlType += ' UNSIGNED';
@@ -167,7 +171,7 @@ export class TableBuilder {
   tinyInteger(name: string) { return this.column('TINYINT', name); }
   boolean(name: string) { return this.column('TINYINT', name); }
   string(name: string, length = 191) { return this.column('VARCHAR', name, length); }
-    decimal(name: string, length: number = 10) { return this.column('DECIMAL', name, length); }
+    decimal(name: string, length: number = 10, decimalPlaces: number = 2) { return this.column('DECIMAL', name, length); }
   char(name: string, length = 191) { return this.column('CHAR', name, length); }
   text(name: string) { return this.column('TEXT', name); }
   longText(name: string) { return this.column('LONGTEXT', name); }
