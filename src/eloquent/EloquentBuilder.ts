@@ -325,17 +325,20 @@ export class EloquentBuilder<T extends Model> {
     }
 
     async paginate(perPage: number = 15, page: number = 1): Promise<QueryResult<T>> {
-        const offset = (page - 1) * perPage;
-        const data = await this.limit(perPage).offset(offset).get();
+        // Coerce to safe positive integers
+        const pp = Number.isFinite(Number(perPage)) ? Math.max(1, Math.floor(Number(perPage))) : 15;
+        const pg = Number.isFinite(Number(page)) ? Math.max(1, Math.floor(Number(page))) : 1;
+        const offset = (pg - 1) * pp;
+        const data = await this.limit(pp).offset(offset).get();
         const total = await this.getCount();
 
         return {
             data,
             pagination: {
-                currentPage: page,
-                perPage,
+                currentPage: pg,
+                perPage: pp,
                 total,
-                lastPage: Math.ceil(total / perPage)
+                lastPage: Math.max(1, Math.ceil(total / pp))
             }
         };
     }
