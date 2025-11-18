@@ -617,12 +617,31 @@ export abstract class Model {
             return this;
         }
 
+        // Helper to normalize SQL params (avoid array/object expansion by driver)
+        const normalizeSqlParam = (val: any) => {
+            if (val === undefined) return undefined as any;
+            if (val === null) return null as any;
+            // Keep Date, Buffer, and ObjectId as-is
+            if (val instanceof Date || Buffer.isBuffer(val)) return val;
+            try {
+                // Lazy import to avoid direct dependency
+                const maybeObjId = (val as any)?._bsontype === 'ObjectID' || (typeof ObjectId !== 'undefined' && val instanceof ObjectId);
+                if (maybeObjId) return String(val);
+            } catch {}
+            const t = typeof val;
+            if (t === 'object') {
+                // JSON stringify plain objects/arrays/maps/sets
+                try { return JSON.stringify(val); } catch { return String(val); }
+            }
+            return val;
+        };
+
         if (doInsert) {
             // INSERT path
             const insertCols = Object.keys(attrs).filter(k => attrs[k] !== undefined && (k !== primaryKey || !(staticClass as any).autoIncrement));
             const placeholders = insertCols.map(() => '?').join(',');
             const sql = `INSERT INTO ${table} (${insertCols.join(',')}) VALUES (${placeholders})`;
-            const params = insertCols.map(c => attrs[c]);
+            const params = insertCols.map(c => normalizeSqlParam(attrs[c]));
             const result: any = await dbQuery<any>(sql, params);
             if ((staticClass as any).autoIncrement && result && result.insertId !== undefined) {
                 this.setAttribute(primaryKey, result.insertId);
@@ -635,7 +654,7 @@ export abstract class Model {
             if (setCols.length) {
                 const setSql = setCols.map(c => `${c} = ?`).join(', ');
                 const sql = `UPDATE ${table} SET ${setSql} WHERE ${primaryKey} = ?`;
-                const params = [...setCols.map(c => dirty[c]), id];
+                const params = [...setCols.map(c => normalizeSqlParam(dirty[c])), id];
                 await dbQuery<any>(sql, params);
             }
         }
