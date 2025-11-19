@@ -17,6 +17,7 @@ import { asyncContextMiddleware } from './middleware/asyncContext';
 import requestLoggerMiddleware from './middleware/requestLogger';
 import validatorMiddleware from './middleware/validatorMiddleware';
 import { initCache } from '@/cache';
+import errorHandler from './middleware/errorHandler';
 
 const app: Application = express();
 
@@ -75,7 +76,7 @@ async function bootstrap() {
     // mount consolidated Laravel-style routes
     app.use(apiRouter);
 
-    // Optional migration lock monitoring endpoint
+    // Optional migration lock monitoring endpoint (register before 404 handler)
     const enableLockEndpoint = String(process.env.ENABLE_MIGRATION_LOCK_ENDPOINT || '').toLowerCase();
     if (enableLockEndpoint === '1' || enableLockEndpoint === 'true') {
       app.get('/internal/migrations/lock', async (req, res) => {
@@ -90,6 +91,14 @@ async function bootstrap() {
       });
       console.log('Migration lock monitoring endpoint enabled at GET /internal/migrations/lock');
     }
+
+    // 404 handler (JSON)
+    app.use((req, res) => {
+      res.status(404).json({ success: false, message: 'Not Found' });
+    });
+
+    // Global error handler (must be after all other middleware & routes)
+    app.use(errorHandler);
 
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
