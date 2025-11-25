@@ -31,6 +31,8 @@ export class EloquentBuilder<T extends Model> {
   private includeTrashed: boolean = false; // when true, do not auto add deleted_at IS NULL
   private appliedSoftDeleteFilter: boolean = false; // ensure we only append once
   private onlyTrashedFlag: boolean = false; // new: query only soft-deleted rows
+  // Used to qualify bare column names when generating SQL (helps avoid ambiguity)
+  private columnQualifier?: string;
 
   constructor(model: typeof Model) {
     this.model = model;
@@ -587,7 +589,10 @@ export class EloquentBuilder<T extends Model> {
       return this.aggregateMongo(functionName, column);
     }
     const tableName = (this.model as typeof Model).getTable();
+    const prev = this.columnQualifier;
+    this.columnQualifier = tableName; // qualify unqualified columns
     const where = this.buildWhereClause();
+    this.columnQualifier = prev;
     const sql = `SELECT ${functionName.toUpperCase()}(${column}) as agg FROM ${tableName}${where.sql}`;
     const rows = await dbQuery<any>(sql, where.params);
     return rows[0]?.agg || '0';
@@ -608,6 +613,15 @@ export class EloquentBuilder<T extends Model> {
     if (!this.whereClauses.length) return { sql: '', params: [] };
     const parts: string[] = [];
     const params: any[] = [];
+
+    const qualify = (name: string): string => {
+      const n = (name || '').trim();
+      if (!n) return n;
+      if (n.includes('.')) return n;
+      if (this.columnQualifier) return `${this.columnQualifier}.${n}`;
+      return n;
+    };
+
     this.whereClauses.forEach((w, idx) => {
       const boolOp = idx === 0 ? '' : (w.boolean || 'and').toUpperCase() + ' ';
       const op = (w.operator || '=').toLowerCase();
@@ -621,14 +635,16 @@ export class EloquentBuilder<T extends Model> {
         return;
       }
 
+      const col = qualify(w.column);
+
       if (Array.isArray(w.value) && (op === 'in' || op === 'not in')) {
         const placeholders = w.value.map(() => '?').join(', ');
         const kw = op === 'in' ? 'IN' : 'NOT IN';
-        parts.push(`${boolOp}${w.column} ${kw} (${placeholders})`);
+        parts.push(`${boolOp}${col} ${kw} (${placeholders})`);
         params.push(...w.value);
       } else if (Array.isArray(w.value) && (op === 'between' || op === 'not between')) {
         const kw = op === 'between' ? 'BETWEEN' : 'NOT BETWEEN';
-        parts.push(`${boolOp}${w.column} ${kw} ? AND ?`);
+        parts.push(`${boolOp}${col} ${kw} ? AND ?`);
         params.push(w.value[0], w.value[1]);
       } else if (w.value === null) {
         const sqlOp =
@@ -637,9 +653,9 @@ export class EloquentBuilder<T extends Model> {
             : op === '!=' || op === '<>'
               ? 'IS NOT'
               : (w.operator || '=').toUpperCase();
-        parts.push(`${boolOp}${w.column} ${sqlOp} NULL`);
+        parts.push(`${boolOp}${col} ${sqlOp} NULL`);
       } else {
-        parts.push(`${boolOp}${w.column} ${(w.operator || '=').toUpperCase()} ?`);
+        parts.push(`${boolOp}${col} ${(w.operator || '=').toUpperCase()} ?`);
         params.push(w.value);
       }
     });
@@ -652,19 +668,27 @@ export class EloquentBuilder<T extends Model> {
     const parts: string[] = [];
     const params: any[] = [];
 
+    const qualify = (name: string): string => {
+      const n = (name || '').trim();
+      if (!n) return n;
+      if (n.includes('.')) return n;
+      if (this.columnQualifier) return `${this.columnQualifier}.${n}`;
+      return n;
+    };
+
     clauses.forEach((w, idx) => {
       const boolOp = idx === 0 ? '' : (w.boolean || 'and').toUpperCase() + ' ';
 
       if (Array.isArray(w.value) && (w.operator || '').toLowerCase() === 'in') {
         const placeholders = w.value.map(() => '?').join(', ');
-        parts.push(`${boolOp}${w.column} IN (${placeholders})`);
+        parts.push(`${boolOp}${qualify(w.column)} IN (${placeholders})`);
         params.push(...w.value);
       } else if (w.value === null) {
         const op = (w.operator || '=').toLowerCase();
         const sqlOp = op === '=' ? 'IS' : op === '!=' || op === '<>' ? 'IS NOT' : op.toUpperCase();
-        parts.push(`${boolOp}${w.column} ${sqlOp} NULL`);
+        parts.push(`${boolOp}${qualify(w.column)} ${sqlOp} NULL`);
       } else {
-        parts.push(`${boolOp}${w.column} ${(w.operator || '=').toUpperCase()} ?`);
+        parts.push(`${boolOp}${qualify(w.column)} ${(w.operator || '=').toUpperCase()} ?`);
         params.push(w.value);
       }
     });
@@ -674,6 +698,177 @@ export class EloquentBuilder<T extends Model> {
 
   private getWhereClauses(): WhereClause[] {
     return this.whereClauses;
+  }
+
+  private buildHasConditionsSQL(baseTable: string): { sql: string; params: any[] } {
+    if (!this.hasConditions.length) return { sql: '', params: [] };
+    const instance = new (this.model as any)();
+    const clauses: string[] = [];
+    const params: any[] = [];
+    const parentPK = (this.model as any).primaryKey || 'id';
+
+    this.hasConditions.forEach(cond => {
+      const relMeta = (instance as any).getRelationship(cond.relation);
+      if (!relMeta) return; // skip silently
+      const relatedModel = relMeta.model as typeof Model;
+      const relatedTable = (relatedModel as any).getTable();
+      const relatedPK = (relatedModel as any).primaryKey || 'id';
+      const operator = cond.operator || '>=';
+      const count = cond.count ?? 1;
+
+      let constraintsSql = '';
+      let constraintParams: any[] = [];
+
+      const softDeleteFragment = (relatedModel as any).softDeletes ? ' AND deleted_at IS NULL' : '';
+
+      let subquery = '';
+      if (relMeta.type === 'hasOne' || relMeta.type === 'hasMany' || relMeta.type === 'morphOne' || relMeta.type === 'morphMany') {
+        const foreignKey = relMeta.foreignKey || `${baseTable}_id`;
+        // Build constraints with relatedTable qualifier
+        if (cond.callback) {
+          const cb = new EloquentBuilder(relatedModel) as any;
+          cb.columnQualifier = relatedTable;
+          cond.callback(cb);
+          const where = cb.buildWhereClause();
+          if (where.sql) {
+            constraintsSql = where.sql.replace(/^\s*WHERE\s*/i, ' AND ');
+            constraintParams = where.params;
+          }
+        }
+        subquery = `SELECT COUNT(*) FROM ${relatedTable} WHERE ${foreignKey} = ${baseTable}.${parentPK}${softDeleteFragment}${constraintsSql}`;
+      } else if (relMeta.type === 'belongsTo') {
+        const foreignKey = relMeta.foreignKey || `${cond.relation}_id`; // on parent
+        const ownerKey = relMeta.ownerKey || relatedPK;
+        if (cond.callback) {
+          const cb = new EloquentBuilder(relatedModel) as any;
+          cb.columnQualifier = relatedTable;
+          cond.callback(cb);
+          const where = cb.buildWhereClause();
+          if (where.sql) {
+            constraintsSql = where.sql.replace(/^\s*WHERE\s*/i, ' AND ');
+            constraintParams = where.params;
+          }
+        }
+        subquery = `SELECT COUNT(*) FROM ${relatedTable} WHERE ${relatedTable}.${ownerKey} = ${baseTable}.${foreignKey}${softDeleteFragment}${constraintsSql}`;
+      } else if (relMeta.type === 'belongsToMany') {
+        const pivot = relMeta.table;
+        const foreignPivotKey = relMeta.foreignKey || `${baseTable}_id`;
+        const relatedPivotKey = relMeta.relatedKey || `${relatedTable}_id`;
+        // Build constraints with alias 'r' qualifier since related table is aliased
+        if (cond.callback) {
+          const cb = new EloquentBuilder(relatedModel) as any;
+          cb.columnQualifier = 'r';
+          cond.callback(cb);
+          const where = cb.buildWhereClause();
+          if (where.sql) {
+            constraintsSql = where.sql.replace(/^\s*WHERE\s*/i, ' AND ');
+            constraintParams = where.params;
+          }
+        }
+        subquery = `SELECT COUNT(*) FROM ${pivot} p JOIN ${relatedTable} r ON r.${relatedPK} = p.${relatedPivotKey} WHERE p.${foreignPivotKey} = ${baseTable}.${parentPK}${(relatedModel as any).softDeletes ? ' AND r.deleted_at IS NULL' : ''}${constraintsSql}`;
+      } else {
+        return; // unsupported
+      }
+      clauses.push(`((${subquery}) ${operator} ?)`);
+      // Ensure params align with placeholders: subquery constraints first, then comparator value
+      params.push(...constraintParams, count);
+    });
+
+    if (!clauses.length) return { sql: '', params: [] };
+    return { sql: clauses.map(c => `AND ${c}`).join(' '), params };
+  }
+
+  private async applyHasConditionsMongo(docs: any[]): Promise<any[]> {
+    if (!this.hasConditions.length || !docs.length) return docs;
+    const instance = new (this.model as any)();
+    const parentPK = (this.model as any).primaryKey || 'id';
+
+    const kept: any[] = [];
+    for (const doc of docs) {
+      let allOk = true;
+      for (const cond of this.hasConditions) {
+        const relMeta = (instance as any).getRelationship(cond.relation);
+        if (!relMeta) {
+          allOk = false;
+          break;
+        }
+        const relatedModel = relMeta.model as typeof Model;
+        const relatedTable = (relatedModel as any).getTable();
+        const relatedPK = (relatedModel as any).primaryKey || 'id';
+        const operator = cond.operator || '>=';
+        const expected = cond.count ?? 1;
+
+        let actual = 0;
+        if (relMeta.type === 'hasOne' || relMeta.type === 'hasMany' || relMeta.type === 'morphOne' || relMeta.type === 'morphMany') {
+          const foreignKey = relMeta.foreignKey || `${(this.model as any).getTable()}_id`;
+          const c = mongoCollection(relatedTable);
+          const constraintBuilder = cond.callback ? new EloquentBuilder(relatedModel) : null;
+          if (constraintBuilder && cond.callback) cond.callback(constraintBuilder as any);
+          const baseFilter: any = { [foreignKey]: doc[parentPK] };
+          if ((relatedModel as any).softDeletes) baseFilter.deleted_at = null;
+          if (constraintBuilder) {
+            const extra = (constraintBuilder as any).buildMongoFilter();
+            const filters = Object.keys(extra).length ? { $and: [baseFilter, extra] } : baseFilter;
+            actual = await c.countDocuments(filters as any);
+          } else {
+            actual = await c.countDocuments(baseFilter as any);
+          }
+        } else if (relMeta.type === 'belongsTo') {
+          const foreignKey = relMeta.foreignKey || `${cond.relation}_id`;
+          const ownerKey = relMeta.ownerKey || relatedPK;
+          const fkVal = doc[foreignKey];
+          if (fkVal === undefined || fkVal === null) actual = 0; else {
+            const c = mongoCollection(relatedTable);
+            const baseFilter: any = { [ownerKey]: fkVal };
+            if ((relatedModel as any).softDeletes) baseFilter.deleted_at = null;
+            if (cond.callback) {
+              const constraintBuilder = new EloquentBuilder(relatedModel);
+              cond.callback(constraintBuilder as any);
+              const extra = (constraintBuilder as any).buildMongoFilter();
+              const filters = Object.keys(extra).length ? { $and: [baseFilter, extra] } : baseFilter;
+              actual = await c.countDocuments(filters as any);
+            } else actual = await c.countDocuments(baseFilter as any);
+          }
+        } else if (relMeta.type === 'belongsToMany') {
+          const pivot = relMeta.table;
+          const foreignPivotKey = relMeta.foreignKey || `${(this.model as any).getTable()}_id`;
+          const relatedPivotKey = relMeta.relatedKey || `${relatedTable}_id`;
+          const pc = mongoCollection(pivot);
+          const pivots = await pc.find({ [foreignPivotKey]: doc[parentPK] }).toArray();
+          if (!pivots.length) actual = 0; else {
+            const relatedIds = Array.from(new Set(pivots.map(p => p[relatedPivotKey])));
+            if (!relatedIds.length) actual = 0; else {
+              const rc = mongoCollection(relatedTable);
+              let filter: any = { [relatedPK]: { $in: relatedIds } };
+              if ((relatedModel as any).softDeletes) filter.deleted_at = null;
+              if (cond.callback) {
+                const constraintBuilder = new EloquentBuilder(relatedModel);
+                cond.callback(constraintBuilder as any);
+                const extra = (constraintBuilder as any).buildMongoFilter();
+                if (Object.keys(extra).length) filter = { $and: [filter, extra] };
+              }
+              actual = await rc.countDocuments(filter as any);
+            }
+          }
+        }
+        let ok = false;
+        switch (operator) {
+          case '>': ok = actual > expected; break;
+          case '>=': ok = actual >= expected; break;
+          case '<': ok = actual < expected; break;
+          case '<=': ok = actual <= expected; break;
+          case '=': case '==': ok = actual === expected; break;
+          case '!=': case '<>': ok = actual !== expected; break;
+          default: ok = actual >= expected; break;
+        }
+        if (!ok) {
+          allOk = false;
+          break;
+        }
+      }
+      if (allOk) kept.push(doc);
+    }
+    return kept;
   }
 
   private async executeQuery(): Promise<any[]> {
@@ -694,11 +889,25 @@ export class EloquentBuilder<T extends Model> {
       );
     });
 
-    // Add where clause
+    // Add where clause (qualify with base table to avoid ambiguity)
+    const prev = this.columnQualifier;
+    this.columnQualifier = tableName;
     const where = this.buildWhereClause();
+    this.columnQualifier = prev;
     if (where.sql) {
       parts.push(where.sql);
       params.push(...where.params);
+    }
+
+    // Add has conditions (translated to subqueries)
+    const hasSql = this.buildHasConditionsSQL(tableName);
+    if (hasSql.sql) {
+      if (!where.sql) {
+        // need a WHERE prefix
+        parts.push('WHERE 1=1');
+      }
+      parts.push(hasSql.sql);
+      params.push(...hasSql.params);
     }
 
     // Add group by
@@ -730,9 +939,24 @@ export class EloquentBuilder<T extends Model> {
   private async getCount(): Promise<number> {
     if (getDbType() === 'mongodb') return this.countMongo();
     const tableName = (this.model as typeof Model).getTable();
+    const prev = this.columnQualifier;
+    this.columnQualifier = tableName;
     const where = this.buildWhereClause();
-    const sql = `SELECT COUNT(*) as count FROM ${tableName}${where.sql}`.trim();
-    const rows = await dbQuery<any>(sql, where.params);
+    this.columnQualifier = prev;
+    const hasSql = this.buildHasConditionsSQL(tableName);
+    const parts: string[] = [`SELECT COUNT(*) as count FROM ${tableName}`];
+    const params: any[] = [];
+    if (where.sql) {
+      parts.push(where.sql);
+      params.push(...where.params);
+    }
+    if (hasSql.sql) {
+      if (!where.sql) parts.push('WHERE 1=1');
+      parts.push(hasSql.sql);
+      params.push(...hasSql.params);
+    }
+    const sql = parts.join(' ').trim();
+    const rows = await dbQuery<any>(sql, params);
     const countRow = rows[0] as any;
     return countRow ? Number(countRow.count) : 0;
   }
@@ -1524,12 +1748,16 @@ export class EloquentBuilder<T extends Model> {
     }
     if (this.offsetValue !== undefined) cursor = cursor.skip(this.offsetValue);
     if (this.limitValue !== undefined) cursor = cursor.limit(this.limitValue);
-    const docs = await cursor.toArray();
-    // map _id to id for ORM
-    return docs.map(d => {
+    let docs = await cursor.toArray();
+    docs = docs.map(d => {
       if (d && d._id && !('id' in d)) d.id = String(d._id);
       return d;
     });
+    // Post-filter by whereHas/whereDoesntHave conditions for Mongo
+    if (this.hasConditions.length) {
+      docs = await this.applyHasConditionsMongo(docs);
+    }
+    return docs;
   }
 
   private async updateMongo(values: Partial<Record<string, any>>): Promise<number> {
@@ -1622,7 +1850,17 @@ export class EloquentBuilder<T extends Model> {
     const tableName = (this.model as typeof Model).getTable();
     const c = mongoCollection(tableName);
     const filter = this.buildMongoFilter();
-    return await c.countDocuments(filter);
+    if (!this.hasConditions.length) {
+      return await c.countDocuments(filter);
+    }
+    // When whereHas/whereDoesntHave exist, fetch minimal docs and post-filter
+    let docs = await c.find(filter, { projection: { _id: 1 } }).toArray();
+    docs = docs.map(d => {
+      if (d && d._id && !('id' in d)) d.id = String(d._id);
+      return d;
+    });
+    const kept = await this.applyHasConditionsMongo(docs);
+    return kept.length;
   }
 
   private async aggregateMongo(fn: string, column: string): Promise<string> {
