@@ -700,14 +700,15 @@ export class EloquentBuilder<T extends Model> {
     return this.whereClauses;
   }
 
-  private buildHasConditionsSQL(baseTable: string): { sql: string; params: any[] } {
-    if (!this.hasConditions.length) return { sql: '', params: [] };
-    const instance = new (this.model as any)();
+  private buildHasConditionsSQL(baseTable: string, forBuilder?: EloquentBuilder<any>): { sql: string; params: any[] } {
+    const builder = forBuilder || this;
+    if (!builder.hasConditions.length) return { sql: '', params: [] };
+    const instance = new (builder.model as any)();
     const clauses: string[] = [];
     const params: any[] = [];
-    const parentPK = (this.model as any).primaryKey || 'id';
+    const parentPK = (builder.model as any).primaryKey || 'id';
 
-    this.hasConditions.forEach(cond => {
+    builder.hasConditions.forEach(cond => {
       const relMeta = (instance as any).getRelationship(cond.relation);
       if (!relMeta) return; // skip silently
       const relatedModel = relMeta.model as typeof Model;
@@ -717,22 +718,27 @@ export class EloquentBuilder<T extends Model> {
       const count = cond.count ?? 1;
 
       let constraintsSql = '';
-      let constraintParams: any[] = [];
+      const constraintParams: any[] = [];
 
       const softDeleteFragment = (relatedModel as any).softDeletes ? ' AND deleted_at IS NULL' : '';
 
       let subquery = '';
       if (relMeta.type === 'hasOne' || relMeta.type === 'hasMany' || relMeta.type === 'morphOne' || relMeta.type === 'morphMany') {
         const foreignKey = relMeta.foreignKey || `${baseTable}_id`;
-        // Build constraints with relatedTable qualifier
         if (cond.callback) {
           const cb = new EloquentBuilder(relatedModel) as any;
           cb.columnQualifier = relatedTable;
           cond.callback(cb);
           const where = cb.buildWhereClause();
           if (where.sql) {
-            constraintsSql = where.sql.replace(/^\s*WHERE\s*/i, ' AND ');
-            constraintParams = where.params;
+            constraintsSql += where.sql.replace(/^\s*WHERE\s*/i, ' AND ');
+            constraintParams.push(...where.params);
+          }
+          // nested whereHas inside callback
+          const nestedHas = this.buildHasConditionsSQL(relatedTable, cb);
+          if (nestedHas.sql) {
+            constraintsSql += ' ' + nestedHas.sql;
+            constraintParams.push(...nestedHas.params);
           }
         }
         subquery = `SELECT COUNT(*) FROM ${relatedTable} WHERE ${foreignKey} = ${baseTable}.${parentPK}${softDeleteFragment}${constraintsSql}`;
@@ -745,8 +751,13 @@ export class EloquentBuilder<T extends Model> {
           cond.callback(cb);
           const where = cb.buildWhereClause();
           if (where.sql) {
-            constraintsSql = where.sql.replace(/^\s*WHERE\s*/i, ' AND ');
-            constraintParams = where.params;
+            constraintsSql += where.sql.replace(/^\s*WHERE\s*/i, ' AND ');
+            constraintParams.push(...where.params);
+          }
+          const nestedHas = this.buildHasConditionsSQL(relatedTable, cb);
+          if (nestedHas.sql) {
+            constraintsSql += ' ' + nestedHas.sql;
+            constraintParams.push(...nestedHas.params);
           }
         }
         subquery = `SELECT COUNT(*) FROM ${relatedTable} WHERE ${relatedTable}.${ownerKey} = ${baseTable}.${foreignKey}${softDeleteFragment}${constraintsSql}`;
@@ -754,15 +765,20 @@ export class EloquentBuilder<T extends Model> {
         const pivot = relMeta.table;
         const foreignPivotKey = relMeta.foreignKey || `${baseTable}_id`;
         const relatedPivotKey = relMeta.relatedKey || `${relatedTable}_id`;
-        // Build constraints with alias 'r' qualifier since related table is aliased
         if (cond.callback) {
           const cb = new EloquentBuilder(relatedModel) as any;
+          // Qualify related table with alias 'r'
           cb.columnQualifier = 'r';
           cond.callback(cb);
           const where = cb.buildWhereClause();
           if (where.sql) {
-            constraintsSql = where.sql.replace(/^\s*WHERE\s*/i, ' AND ');
-            constraintParams = where.params;
+            constraintsSql += where.sql.replace(/^\s*WHERE\s*/i, ' AND ');
+            constraintParams.push(...where.params);
+          }
+          const nestedHas = this.buildHasConditionsSQL('r', cb);
+          if (nestedHas.sql) {
+            constraintsSql += ' ' + nestedHas.sql;
+            constraintParams.push(...nestedHas.params);
           }
         }
         subquery = `SELECT COUNT(*) FROM ${pivot} p JOIN ${relatedTable} r ON r.${relatedPK} = p.${relatedPivotKey} WHERE p.${foreignPivotKey} = ${baseTable}.${parentPK}${(relatedModel as any).softDeletes ? ' AND r.deleted_at IS NULL' : ''}${constraintsSql}`;
@@ -788,10 +804,7 @@ export class EloquentBuilder<T extends Model> {
       let allOk = true;
       for (const cond of this.hasConditions) {
         const relMeta = (instance as any).getRelationship(cond.relation);
-        if (!relMeta) {
-          allOk = false;
-          break;
-        }
+        if (!relMeta) { allOk = false; break; }
         const relatedModel = relMeta.model as typeof Model;
         const relatedTable = (relatedModel as any).getTable();
         const relatedPK = (relatedModel as any).primaryKey || 'id';
@@ -799,6 +812,92 @@ export class EloquentBuilder<T extends Model> {
         const expected = cond.count ?? 1;
 
         let actual = 0;
+
+        // Helper: apply nested has on related docs collection
+        const applyNestedHasForRelatedDocs = async (docsArr: any[], cb?: EloquentBuilder<any>): Promise<number> => {
+          if (!cb || !cb.hasConditions || cb.hasConditions.length === 0) return docsArr.length;
+          const filtered: any[] = [];
+          for (const rd of docsArr) {
+            let okAll = true;
+            for (const nestedCond of cb.hasConditions) {
+              const relMeta2 = (new (relatedModel as any)() as any).getRelationship(nestedCond.relation);
+              if (!relMeta2) { okAll = false; break; }
+              const nestedModel = relMeta2.model as typeof Model;
+              const nestedTable = (nestedModel as any).getTable();
+              const nestedPK = (nestedModel as any).primaryKey || 'id';
+              const op = nestedCond.operator || '>=';
+              const exp = nestedCond.count ?? 1;
+              let innerActual = 0;
+              if (relMeta2.type === 'hasOne' || relMeta2.type === 'hasMany' || relMeta2.type === 'morphOne' || relMeta2.type === 'morphMany') {
+                const fk = relMeta2.foreignKey || `${relatedTable}_id`;
+                const c2 = mongoCollection(nestedTable);
+                const nestedBuilder = nestedCond.callback ? new EloquentBuilder(nestedModel) : null;
+                if (nestedBuilder && nestedCond.callback) nestedCond.callback(nestedBuilder as any);
+                const baseFilter2: any = { [fk]: rd[relatedPK] };
+                if ((nestedModel as any).softDeletes) baseFilter2.deleted_at = null;
+                if (nestedBuilder) {
+                  const extra2 = (nestedBuilder as any).buildMongoFilter();
+                  const filters2 = Object.keys(extra2).length ? { $and: [baseFilter2, extra2] } : baseFilter2;
+                  innerActual = await c2.countDocuments(filters2 as any);
+                } else {
+                  innerActual = await c2.countDocuments(baseFilter2 as any);
+                }
+              } else if (relMeta2.type === 'belongsTo') {
+                const fk2 = relMeta2.foreignKey || `${nestedCond.relation}_id`;
+                const ownerKey2 = relMeta2.ownerKey || nestedPK;
+                const fkVal2 = rd[fk2];
+                if (fkVal2 === undefined || fkVal2 === null) innerActual = 0; else {
+                  const c2 = mongoCollection(nestedTable);
+                  const baseFilter2: any = { [ownerKey2]: fkVal2 };
+                  if ((nestedModel as any).softDeletes) baseFilter2.deleted_at = null;
+                  if (nestedCond.callback) {
+                    const nestedBuilder = new EloquentBuilder(nestedModel);
+                    nestedCond.callback(nestedBuilder as any);
+                    const extra2 = (nestedBuilder as any).buildMongoFilter();
+                    const filters2 = Object.keys(extra2).length ? { $and: [baseFilter2, extra2] } : baseFilter2;
+                    innerActual = await c2.countDocuments(filters2 as any);
+                  } else innerActual = await c2.countDocuments(baseFilter2 as any);
+                }
+              } else if (relMeta2.type === 'belongsToMany') {
+                const pivot2 = relMeta2.table;
+                const foreignPivotKey2 = relMeta2.foreignKey || `${(relatedModel as any).getTable()}_id`;
+                const relatedPivotKey2 = relMeta2.relatedKey || `${nestedTable}_id`;
+                const pc2 = mongoCollection(pivot2);
+                const pivots2 = await pc2.find({ [foreignPivotKey2]: rd[relatedPK] }).toArray();
+                if (!pivots2.length) innerActual = 0; else {
+                  const relatedIds2 = Array.from(new Set(pivots2.map(p => p[relatedPivotKey2])));
+                  if (!relatedIds2.length) innerActual = 0; else {
+                    const rc2 = mongoCollection(nestedTable);
+                    let filter2: any = { [nestedPK]: { $in: relatedIds2 } };
+                    if ((nestedModel as any).softDeletes) filter2.deleted_at = null;
+                    if (nestedCond.callback) {
+                      const nestedBuilder = new EloquentBuilder(nestedModel);
+                      nestedCond.callback(nestedBuilder as any);
+                      const extra2 = (nestedBuilder as any).buildMongoFilter();
+                      if (Object.keys(extra2).length) filter2 = { $and: [filter2, extra2] };
+                    }
+                    innerActual = await rc2.countDocuments(filter2 as any);
+                  }
+                }
+              } else { okAll = false; break; }
+
+              let okInner = false;
+              switch (op) {
+                case '>': okInner = innerActual > exp; break;
+                case '>=': okInner = innerActual >= exp; break;
+                case '<': okInner = innerActual < exp; break;
+                case '<=': okInner = innerActual <= exp; break;
+                case '=': case '==': okInner = innerActual === exp; break;
+                case '!=': case '<>': okInner = innerActual !== exp; break;
+                default: okInner = innerActual >= exp; break;
+              }
+              if (!okInner) { okAll = false; break; }
+            }
+            if (okAll) filtered.push(rd);
+          }
+          return filtered.length;
+        };
+
         if (relMeta.type === 'hasOne' || relMeta.type === 'hasMany' || relMeta.type === 'morphOne' || relMeta.type === 'morphMany') {
           const foreignKey = relMeta.foreignKey || `${(this.model as any).getTable()}_id`;
           const c = mongoCollection(relatedTable);
@@ -809,7 +908,12 @@ export class EloquentBuilder<T extends Model> {
           if (constraintBuilder) {
             const extra = (constraintBuilder as any).buildMongoFilter();
             const filters = Object.keys(extra).length ? { $and: [baseFilter, extra] } : baseFilter;
-            actual = await c.countDocuments(filters as any);
+            if (constraintBuilder.hasConditions && constraintBuilder.hasConditions.length) {
+              const arr = await c.find(filters as any).toArray();
+              actual = await applyNestedHasForRelatedDocs(arr, constraintBuilder as any);
+            } else {
+              actual = await c.countDocuments(filters as any);
+            }
           } else {
             actual = await c.countDocuments(baseFilter as any);
           }
@@ -826,7 +930,12 @@ export class EloquentBuilder<T extends Model> {
               cond.callback(constraintBuilder as any);
               const extra = (constraintBuilder as any).buildMongoFilter();
               const filters = Object.keys(extra).length ? { $and: [baseFilter, extra] } : baseFilter;
-              actual = await c.countDocuments(filters as any);
+              if (constraintBuilder.hasConditions && constraintBuilder.hasConditions.length) {
+                const arr = await c.find(filters as any).toArray();
+                actual = await applyNestedHasForRelatedDocs(arr, constraintBuilder as any);
+              } else {
+                actual = await c.countDocuments(filters as any);
+              }
             } else actual = await c.countDocuments(baseFilter as any);
           }
         } else if (relMeta.type === 'belongsToMany') {
@@ -846,11 +955,19 @@ export class EloquentBuilder<T extends Model> {
                 cond.callback(constraintBuilder as any);
                 const extra = (constraintBuilder as any).buildMongoFilter();
                 if (Object.keys(extra).length) filter = { $and: [filter, extra] };
+                if (constraintBuilder.hasConditions && constraintBuilder.hasConditions.length) {
+                  const arr = await rc.find(filter as any).toArray();
+                  actual = await applyNestedHasForRelatedDocs(arr, constraintBuilder as any);
+                } else {
+                  actual = await rc.countDocuments(filter as any);
+                }
+              } else {
+                actual = await rc.countDocuments(filter as any);
               }
-              actual = await rc.countDocuments(filter as any);
             }
           }
         }
+
         let ok = false;
         switch (operator) {
           case '>': ok = actual > expected; break;
@@ -861,10 +978,7 @@ export class EloquentBuilder<T extends Model> {
           case '!=': case '<>': ok = actual !== expected; break;
           default: ok = actual >= expected; break;
         }
-        if (!ok) {
-          allOk = false;
-          break;
-        }
+        if (!ok) { allOk = false; break; }
       }
       if (allOk) kept.push(doc);
     }
@@ -1327,7 +1441,7 @@ export class EloquentBuilder<T extends Model> {
     // SQL implementation (no Mongo calls). Mongo handled separately in loadBelongsToManyMongo.
     const pivotTable = rel.table;
     const parentPK = (this.model as any).primaryKey || 'id';
-    const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
+    const foreignPivotKey = rel.foreignKey || `${(this.model as any).getTable()}_id`;
     const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
     const parentIds = Array.from(
       new Set(
@@ -1405,7 +1519,7 @@ export class EloquentBuilder<T extends Model> {
   ): Promise<void> {
     const pivotTable = rel.table;
     const parentPK = (this.model as any).primaryKey || 'id';
-    const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
+    const foreignPivotKey = rel.foreignKey || `${(this.model as any).getTable()}_id`;
     const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
     const parentRaw = models
       .map(m => (m as any).getAttribute(parentPK))
@@ -1564,15 +1678,27 @@ export class EloquentBuilder<T extends Model> {
       const grouped = new Map<any, any[]>();
       rows.forEach(r => {
         const k = r[foreignKey];
+        if (r && r._id && !('id' in r)) r.id = String(r._id);
         if (!grouped.has(k)) grouped.set(k, []);
         grouped.get(k)!.push(r);
+        const ks = String(k);
+        if (!grouped.has(ks)) grouped.set(ks, []);
+        grouped.get(ks)!.push(r);
       });
-
       models.forEach(m => {
         const key = (m as any).getAttribute('id');
-        const list = (grouped.get(key) || []).map(row => {
+        const keys = this.expandIdForms(key).map(v => String(v));
+        const acc: any[] = [];
+        keys.forEach(k => {
+          const arr = grouped.get(k) || [];
+          if (arr.length) acc.push(...arr);
+        });
+        const uniq = Array.from(
+          new Set(acc.map(x => (x._id ? String(x._id) : JSON.stringify(x))))
+        ).map(id => acc.find(x => (x._id ? String(x._id) : JSON.stringify(x)) === id));
+        const list = uniq.map(row => {
           const inst = new (relatedModel as any)();
-          inst.hydrate(row);
+          inst.hydrate(row!);
           return inst;
         });
         this.setRelation(m, relation, list);
@@ -2068,7 +2194,7 @@ export class EloquentBuilder<T extends Model> {
   ): Promise<void> {
     const pivotTable = rel.table;
     const parentPK = (this.model as any).primaryKey || 'id';
-    const foreignPivotKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
+    const foreignPivotKey = rel.foreignKey || `${(this.model as any).getTable()}_id`;
     const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
     const parentRaw = models
       .map(m => (m as any).getAttribute(parentPK))
