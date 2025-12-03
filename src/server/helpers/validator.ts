@@ -635,15 +635,15 @@ export async function validate<T extends Record<string, any>>(
         }
         const rows: any = await query(sql, params);
         const c = rows && rows[0] ? Number(rows[0].c) : 0;
-        if (column == 'id') {
-          column = '_id';
-          val = new ObjectId(val);
-        }
         if (c > 0) {
           pushError(field, 'unique', { value: val, table, column });
           return true;
         }
       } else {
+          if(column == 'id') {
+              column = '_id';
+              val = new ObjectId(val);
+          }
         const col = collection(table);
         const q: any = { [column]: val };
         if (except) q._id = { $ne: except };
