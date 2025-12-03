@@ -1,6 +1,5 @@
 import { query, getDbType, collection } from '@/config/db.config';
-import {Model} from "@/eloquent/Model";
-import {ObjectId} from "mongodb";
+import { ObjectId } from 'mongodb';
 
 export class ValidationError extends Error {
   errors: Record<string, string[]>;
@@ -131,13 +130,13 @@ function resolveMessage(
 }
 
 // Core validation function
-export async function validate(
+export async function validate<T extends Record<string, any>>(
   payload: any,
   rules: Record<string, RuleSpec>,
   customMessages?: Record<string, string>,
-): Promise<any> {
-  const out: any = { ...(payload || {}) };
-  const errors: Record<string, string[]> = {};
+): Promise<T> {
+    const out = { ...(payload || {}) } as unknown as T & Record<string, any>;
+    const errors: Record<string, string[]> = {};
   const messageErrors: Record<string, string[]> = {};
   const metaErrors: Record<string, { code: string; meta: Record<string, any> }[]> = {};
   const fieldMessagesMap: Record<string, Record<string, string>> = {};
@@ -176,7 +175,7 @@ export async function validate(
         continue;
       }
       if (res && (res as any).ok === true && 'value' in (res as any)) {
-        out[field] = (res as any).value;
+          (out as any)[field] = (res as any).value;
         continue;
       }
       continue;
@@ -450,7 +449,7 @@ export async function validate(
       }
     }
 
-    if (!failed) out[field] = val;
+    if (!failed) (out as any)[field] = val;
   }
 
   // Helper function to push errors
@@ -475,7 +474,7 @@ export async function validate(
     throw new ValidationError(errors, messageErrors);
   }
 
-  return out;
+  return out as T;
 
   // Rule handler functions
   async function handleMinRule(field: string, val: any, rule: string) {
@@ -602,9 +601,9 @@ export async function validate(
         }
       } else {
         const col = collection(table);
-        if (column == "id"){
-            column = "_id"
-            val = new ObjectId(val)
+        if (column == 'id') {
+          column = '_id';
+          val = new ObjectId(val);
         }
         const found = await col.findOne({ [column]: val });
         if (!found) {
@@ -636,10 +635,10 @@ export async function validate(
         }
         const rows: any = await query(sql, params);
         const c = rows && rows[0] ? Number(rows[0].c) : 0;
-          if (column == "id"){
-              column = "_id"
-              val = new ObjectId(val)
-          }
+        if (column == 'id') {
+          column = '_id';
+          val = new ObjectId(val);
+        }
         if (c > 0) {
           pushError(field, 'unique', { value: val, table, column });
           return true;
