@@ -1,7 +1,7 @@
-import express, { Application } from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import path from "path";
+import express, { Application } from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import path from 'path';
 
 // Resolve .env relative to this compiled file's directory so it works both in TS and built JS
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
@@ -10,7 +10,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 import '@/global/autoload';
 
 // Import database after loading env so top-level DB config reads the populated process.env
-import { initDatabase, query as _dbQuery } from "@/config/db.config";
+import { initDatabase, query as _dbQuery } from '@/config/db.config';
 import '@/server/Providers/providers';
 import apiRouter from '@/server/routes';
 import { asyncContextMiddleware } from './middleware/asyncContext';
@@ -18,6 +18,7 @@ import requestLoggerMiddleware from './middleware/requestLogger';
 import validatorMiddleware from './middleware/validatorMiddleware';
 import { initCache } from '@/cache';
 import errorHandler from './middleware/errorHandler';
+import responseExtenderMiddleware from "@/server/middleware/responseExtenderMiddleware";
 
 const app: Application = express();
 
@@ -49,7 +50,7 @@ async function bootstrap() {
       console.warn('SKIP_DB is set — skipping database initialization');
     } else {
       await initDatabase();
-      console.log("Database connection established");
+      console.log('Database connection established');
       await autoSyncPermissionsIfEnabled();
     }
 
@@ -73,18 +74,32 @@ async function bootstrap() {
     // Attach request.validate helper
     app.use(validatorMiddleware);
 
+    app.use(responseExtenderMiddleware)
+
     // mount consolidated Laravel-style routes
     app.use(apiRouter);
 
     // Optional migration lock monitoring endpoint (register before 404 handler)
-    const enableLockEndpoint = String(process.env.ENABLE_MIGRATION_LOCK_ENDPOINT || '').toLowerCase();
+    const enableLockEndpoint = String(
+      process.env.ENABLE_MIGRATION_LOCK_ENDPOINT || '',
+    ).toLowerCase();
     if (enableLockEndpoint === '1' || enableLockEndpoint === 'true') {
       app.get('/internal/migrations/lock', async (req, res) => {
         try {
-          const lockName = (req.query.name as string) || process.env.MIGRATION_LOCK_NAME || 'rentivo_migrations_lock';
-          const rows: any = await _dbQuery('SELECT IS_FREE_LOCK(?) as is_free, IS_USED_LOCK(?) as holder', [lockName, lockName]);
+          const lockName =
+            (req.query.name as string) ||
+            process.env.MIGRATION_LOCK_NAME ||
+            'rentivo_migrations_lock';
+          const rows: any = await _dbQuery(
+            'SELECT IS_FREE_LOCK(?) as is_free, IS_USED_LOCK(?) as holder',
+            [lockName, lockName],
+          );
           const r = rows && rows[0] ? rows[0] : null;
-          return res.json({ lockName, isFree: r ? r.is_free === 1 : null, holder: r ? r.holder : null });
+          return res.json({
+            lockName,
+            isFree: r ? r.is_free === 1 : null,
+            holder: r ? r.holder : null,
+          });
         } catch (e) {
           return res.status(500).json({ error: String(e) });
         }
@@ -104,7 +119,7 @@ async function bootstrap() {
       console.log(`Server is running on port ${PORT}`);
     });
   } catch (err) {
-    console.error("Failed to initialize database connection", err);
+    console.error('Failed to initialize database connection', err);
     process.exit(1);
   }
 }
