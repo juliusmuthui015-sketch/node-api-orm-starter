@@ -1,5 +1,7 @@
 import { query, getDbType, collection } from '@/config/db.config';
 import { ObjectId } from 'mongodb';
+import {EloquentBuilder} from "@/eloquent/EloquentBuilder";
+import {Model} from "@/eloquent/Model";
 
 export class ValidationError extends Error {
   errors: Record<string, string[]>;
@@ -590,26 +592,20 @@ export async function validate<T extends Record<string, any>>(
     try {
       const spec = rule.split(':')[1];
       let [table, column] = spec.split(',');
-      if (getDbType() === 'mysql') {
-        const rows: any = await query(
-          `SELECT 1 FROM \`${table}\` WHERE \`${column}\` = ? LIMIT 1`,
-          [val],
-        );
-        if (!rows || rows.length === 0) {
+      table = (table || '').trim();
+      column = (column || 'id').trim();
+
+        class ValidatorModel extends Model {
+            static table = table;
+            static primaryKey = 'id';
+            static fillable = [column];
+        }
+        const exists = await ValidatorModel.query()
+            .where(column, '=', val)
+            .exists();
+      if (!exists) {
           pushError(field, 'exists', { value: val, table, column });
           return true;
-        }
-      } else {
-        const col = collection(table);
-        if (column == 'id') {
-          column = '_id';
-          val = new ObjectId(val);
-        }
-        const found = await col.findOne({ [column]: val });
-        if (!found) {
-          pushError(field, 'exists', { value: val, table, column });
-          return true;
-        }
       }
     } catch (e) {
       pushError(field, 'exists', { value: val });
@@ -626,32 +622,19 @@ export async function validate<T extends Record<string, any>>(
       let column = partsSpec[1] || 'id';
       const except = partsSpec[2];
 
-      if (getDbType() === 'mysql') {
-        let sql = `SELECT COUNT(*) as c FROM \`${table}\` WHERE \`${column}\` = ?`;
-        const params: any[] = [val];
-        if (except !== undefined && except !== '') {
-          sql += ` AND id != ?`;
-          params.push(except);
-        }
-        const rows: any = await query(sql, params);
-        const c = rows && rows[0] ? Number(rows[0].c) : 0;
-        if (c > 0) {
+      class ValidatorModel extends Model {
+          static table = table;
+          static primaryKey = 'id';
+          static fillable = [column];
+      }
+      const exists = await ValidatorModel.query()
+          .where(column, '=', val)
+          .where(function (query) {
+              query.where(ValidatorModel.primaryKey, '!=', except)
+      }).exists();
+      if (exists) {
           pushError(field, 'unique', { value: val, table, column });
           return true;
-        }
-      } else {
-          if(column == 'id') {
-              column = '_id';
-              val = new ObjectId(val);
-          }
-        const col = collection(table);
-        const q: any = { [column]: val };
-        if (except) q._id = { $ne: except };
-        const found = await col.countDocuments(q);
-        if (found > 0) {
-          pushError(field, 'unique', { value: val, table, column });
-          return true;
-        }
       }
     } catch (e) {
       pushError(field, 'unique', { value: val });
