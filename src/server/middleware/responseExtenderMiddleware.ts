@@ -24,7 +24,7 @@ export default function responseExtenderMiddleware(
 ) {
     res.jsonAsync = async function<T extends { toJSONAsync: () => Promise<any> }>(data: T): Promise<Response> {
         if(data instanceof Model){
-            return res.json(data);
+            return res.json(await data.toJSONAsync());
         }
         if (isQueryResult(data)) {
 
