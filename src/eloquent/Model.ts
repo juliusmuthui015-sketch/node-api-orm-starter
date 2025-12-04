@@ -1810,29 +1810,18 @@ export abstract class Model {
     }
 
     public async load(relations: string[] | string): Promise<this> {
-        const names = Array.isArray(relations) ? relations : [relations];
-        for (const name of names) {
-            const config = this.getRelationship(name);
-            if (!config || typeof (this as any)[name] !== 'function') continue;
-            const relQuery = (this as any)[name]();
-            try {
-                switch (config.type) {
-                    case 'hasOne':
-                    case 'belongsTo':
-                        this.relationshipsLoaded[name] = await relQuery.first();
-                        break;
-                    case 'hasMany':
-                    case 'belongsToMany':
-                        this.relationshipsLoaded[name] = await relQuery.get();
-                        break;
-                    default:
-                        this.relationshipsLoaded[name] = await relQuery.get?.();
-                        break;
-                }
-            } catch (e) {
-                // If relation resolution fails, leave as undefined
-            }
+        const staticClass = this.constructor as typeof Model;
+
+        const fresh = await staticClass
+            .query()
+            .with(relations)
+            .where(this.primaryKey, this.getAttributes()[this.primaryKey])
+            .first();
+
+        if (fresh) {
+            this.hydrate({...fresh.attributes, ...fresh.relationshipsLoaded});
         }
+
         return this;
     }
 
