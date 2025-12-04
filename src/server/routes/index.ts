@@ -6,7 +6,8 @@ import RouterBuilder from "@/eloquent/Router/router";
 
 // Use middleware aliases (strings) resolved by middlewareConfig via RouterBuilder
 
-const rb = new RouterBuilder();
+export const routesBuilder = new RouterBuilder();
+const rb = routesBuilder;
 const UC = UserController;
 
 rb.prefix('/api').group((api: RouterBuilder) => {
