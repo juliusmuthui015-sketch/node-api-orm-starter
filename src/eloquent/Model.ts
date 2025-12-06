@@ -5,34 +5,8 @@ import { HasOne, HasMany, BelongsTo, BelongsToMany } from './relationships';
 import { query as dbQuery, getDbType, collection as mongoCollection } from '@/config/db.config';
 import util from 'util';
 import { ObjectId } from 'mongodb';
-
-
-// Add cache for accessors/mutators
-interface AccessorDescriptor {
-    name: string;
-    sync?: (value: any, instance: Model) => any;
-    async?: (value: any, instance: Model) => Promise<any>;
-}
-
-interface MutatorDescriptor {
-    name: string;
-    sync?: (value: any, instance: Model) => any;
-    async?: (value: any, instance: Model) => Promise<any>;
-}
-
-// Add this interface for type safety
-export interface ToJSONOptions {
-    maxDepth?: number;
-    currentDepth?: number;
-    visited?: WeakSet<any>;
-    include?: string[];
-    exclude?: string[];
-    withRelations?: boolean;
-    includeMetadata?: boolean;
-    relationTree?: any;
-    withAccessors?: boolean; // New option to include accessors
-    onlyAppended?: boolean; // New option to only include appended attributes
-}
+import {AccessorDescriptor, ModelEvents, MutatorDescriptor, ToJSONOptions} from "@/eloquent/model_interfaces";
+import {applyTraits, ScopeMethod} from "@/eloquent/Traits/traits";
 
 export abstract class Model {
     [key: string]: any;
@@ -48,6 +22,28 @@ export abstract class Model {
     static softDeletes: boolean = false;
     static relationships: { [key: string]: RelationshipConfig } = {};
     static autoIncrement: boolean = true;
+
+
+    // New static properties for traits and scopes
+    static traits: string[] = [];
+    static localScopes: { [name: string]: ScopeMethod<any> } = {};
+    static globalScopes: { [name: string]: (builder: EloquentBuilder<any>) => void } = {};
+    static withoutGlobalScopes: string[] = [];
+    static eventListeners: {
+        [K in keyof ModelEvents]: ((model: Model) => boolean | void | Promise<boolean | void>)[]
+    } = {
+        creating: [],
+        created: [],
+        updating: [],
+        updated: [],
+        saving: [],
+        saved: [],
+        deleting: [],
+        deleted: [],
+        restoring: [],
+        restored: [],
+        retrieved: [],
+    };
 
     // New static properties for accessors/mutators
     private static _accessors: Map<string, AccessorDescriptor> = new Map();
@@ -66,6 +62,8 @@ export abstract class Model {
     protected __attributeCache: Map<string, any> = new Map();
 
     constructor(attributes: ModelAttributes = {}) {
+        // Apply traits to instance
+        this.applyTraitsToInstance();
         this.fill(attributes);
         this.original = { ...this.attributes };
         return new Proxy(this, {
@@ -119,6 +117,322 @@ export abstract class Model {
             },
         });
     }
+    /**
+     * Apply traits to instance (after static traits have been applied)
+     */
+    private applyTraitsToInstance(): void {
+        const staticClass = this.constructor as typeof Model;
+
+        // Initialize static properties if not already done
+        if (!staticClass.traits) {
+            staticClass.traits = [];
+        }
+        if (!staticClass.localScopes) {
+            staticClass.localScopes = {};
+        }
+        if (!staticClass.globalScopes) {
+            staticClass.globalScopes = {};
+        }
+        if (!staticClass.withoutGlobalScopes) {
+            staticClass.withoutGlobalScopes = [];
+        }
+        if (!staticClass.eventListeners) {
+            staticClass.eventListeners = {
+                creating: [],
+                created: [],
+                updating: [],
+                updated: [],
+                saving: [],
+                saved: [],
+                deleting: [],
+                deleted: [],
+                restoring: [],
+                restored: [],
+                retrieved: [],
+            };
+        }
+
+        // Apply traits to the class (once per class)
+        if ((staticClass as any).__traitsApplied !== true) {
+            applyTraits(staticClass, staticClass.traits);
+            (staticClass as any).__traitsApplied = true;
+        }
+    }
+
+    // ====================
+    // SCOPE METHODS (Similar to Laravel)
+    // ====================
+
+    /**
+     * Add a local scope to the model
+     */
+    static addLocalScope(name: string, scope: ScopeMethod<any>): void {
+        this.localScopes[name] = scope;
+    }
+
+    /**
+     * Add a global scope to the model
+     */
+    static addGlobalScope(name: string, scope: (builder: EloquentBuilder<any>) => void): void {
+        this.globalScopes[name] = scope;
+    }
+
+    /**
+     * Remove a global scope
+     */
+    static removeGlobalScope(name: string): void {
+        delete this.globalScopes[name];
+    }
+
+    /**
+     * Get all global scopes
+     */
+    static getGlobalScopes(): { [name: string]: (builder: EloquentBuilder<any>) => void } {
+        return this.globalScopes;
+    }
+
+    /**
+     * Apply scopes to a query builder
+     */
+    static applyScopes(builder: EloquentBuilder<any>): EloquentBuilder<any> {
+        // Apply global scopes (except those in withoutGlobalScopes)
+        Object.entries(this.globalScopes).forEach(([name, scope]) => {
+            if (!this.withoutGlobalScopes.includes(name)) {
+                scope(builder);
+            }
+        });
+        return builder;
+    }
+
+    /**
+     * Register a scope method (similar to Laravel's scope naming convention)
+     */
+    static registerScopeMethod(name: string, scope: ScopeMethod<any>): void {
+        const methodName = `scope${name.charAt(0).toUpperCase() + name.slice(1)}`;
+        (this as any)[methodName] = scope;
+        this.localScopes[name] = scope;
+    }
+
+    /**
+     * Query with a local scope
+     */
+    static scope<T extends typeof Model>(this: T, name: string, ...args: any[]): EloquentBuilder<InstanceType<T>> {
+        const builder = this.query();
+
+        // Apply global scopes first
+        this.applyScopes(builder);
+
+        // Apply local scope if exists
+        if (this.localScopes[name]) {
+            this.localScopes[name](builder, ...args);
+        } else {
+            // Try to find scope method with naming convention
+            const scopeMethodName = `scope${name.charAt(0).toUpperCase() + name.slice(1)}`;
+            if ((this as any)[scopeMethodName]) {
+                (this as any)[scopeMethodName](builder, ...args);
+            }
+        }
+
+        return builder;
+    }
+
+    /**
+     * Query without global scopes
+     */
+    static withoutGlobalScope<T extends typeof Model>(this: T, ...scopes: string[]): EloquentBuilder<InstanceType<T>> {
+        const builder = this.query();
+
+        // Mark scopes to be excluded
+        this.withoutGlobalScopes.push(...scopes);
+
+        // Apply only global scopes that are not excluded
+        Object.entries(this.globalScopes).forEach(([name, scope]) => {
+            if (!this.withoutGlobalScopes.includes(name)) {
+                scope(builder);
+            }
+        });
+
+        return builder;
+    }
+
+    /**
+     * Query without any global scopes
+     */
+    static withoutGlobalScopes_<T extends typeof Model>(this: T): EloquentBuilder<InstanceType<T>> {
+        const builder = this.query();
+        // Don't apply any global scopes
+        return builder;
+    }
+
+    // ====================
+    // EVENT METHODS (Similar to Laravel)
+    // ====================
+
+    /**
+     * Register an event listener
+     */
+    addEventListener(
+        event: keyof ModelEvents,
+        callback: (model: Model) => boolean | void | Promise<boolean | void>
+    ): void {
+        if (!this.eventListeners[event]) {
+            this.eventListeners[event] = [];
+        }
+        this.eventListeners[event].push(callback);
+    }
+
+    /**
+     * Dispatch an event
+     */
+    static async dispatchEvent(event: keyof ModelEvents, model: Model): Promise<void> {
+        const listeners = this.eventListeners[event] || [];
+        for (const listener of listeners) {
+            await listener(model);
+        }
+    }
+
+    /**
+     * Fire model events (similar to Laravel's fireModelEvent)
+     */
+    static async fireModelEvent(event: keyof ModelEvents, model: Model, halt: boolean = false): Promise<boolean> {
+        const listeners = this.eventListeners[event] || [];
+
+        for (const listener of listeners) {
+            const result = await listener(model);
+
+            if (halt === true && result === false) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Boot the model (similar to Laravel's boot method)
+     */
+    static boot(): void {
+        // Apply traits
+        applyTraits(this, this.traits);
+
+        // Call bootTraits if exists
+        if ((this as any).bootTraits) {
+            (this as any).bootTraits();
+        }
+    }
+
+
+    // ====================
+    // TRAIT METHODS
+    // ====================
+
+    /**
+     * Ensure traits and static containers are initialized once per subclass.
+     * This runs automatically on first static call (e.g., query/ scope).
+     */
+    static ensureBooted(): void {
+        const self = this as typeof Model & {
+            __traitsApplied?: boolean;
+        };
+        // Initialize static containers if missing
+        if (!self.traits) self.traits = [];
+        if (!self.localScopes) self.localScopes = {} as any;
+        if (!self.globalScopes) self.globalScopes = {} as any;
+        if (!self.withoutGlobalScopes) self.withoutGlobalScopes = [] as any;
+        if (!self.eventListeners) {
+            self.eventListeners = {
+                creating: [],
+                created: [],
+                updating: [],
+                updated: [],
+                saving: [],
+                saved: [],
+                deleting: [],
+                deleted: [],
+                restoring: [],
+                restored: [],
+                retrieved: [],
+            } as any;
+        }
+        if (self.__traitsApplied === true) return;
+        try {
+            applyTraits(self, self.traits || []);
+        } catch (e) {
+            console.warn(`Failed to apply traits for ${self.name}:`, e);
+        }
+        self.__traitsApplied = true;
+    }
+
+    /**
+     * Check if model uses a trait
+     */
+    static usesTrait(traitName: string): boolean {
+        return this.traits.includes(traitName);
+    }
+
+    /**
+     * Add traits to the model
+     */
+    static addTraits(...traitNames: string[]): void {
+        this.traits = [...new Set([...this.traits, ...traitNames])];
+        // Re-apply traits
+        applyTraits(this, this.traits);
+    }
+
+    /**
+     * Boot all traits (similar to Laravel's bootTraits)
+     */
+    static bootTraits(): void {
+        const staticClass = this as typeof Model;
+
+        // Get trait methods that start with 'boot'
+        const traitMethods = Object.getOwnPropertyNames(staticClass.prototype)
+            .filter(method => method.startsWith('boot') && method !== 'bootTraits');
+
+        traitMethods.forEach(method => {
+            (staticClass.prototype as any)[method].call(staticClass);
+        });
+    }
+
+    // ====================
+    // MACRO METHODS (Similar to Laravel's macroable)
+    // ====================
+
+    /**
+     * Add a macro to the model class
+     */
+    static macro(name: string, macro: Function): void {
+        (this as any)[name] = macro;
+    }
+
+    /**
+     * Check if a macro exists
+     */
+    static hasMacro(name: string): boolean {
+        return !!(this as any)[name];
+    }
+
+    /**
+     * Mixin traits/macros from another class
+     */
+    static mixin(traitClass: any): void {
+        const methods = Object.getOwnPropertyNames(traitClass.prototype);
+
+        methods.forEach(method => {
+            if (method !== 'constructor') {
+                this.prototype[method] = traitClass.prototype[method];
+            }
+        });
+
+        // Also mix static methods
+        const staticMethods = Object.getOwnPropertyNames(traitClass);
+        staticMethods.forEach(method => {
+            if (method !== 'length' && method !== 'name' && method !== 'prototype') {
+                (this as any)[method] = traitClass[method];
+            }
+        });
+    }
+
 
     // Helper to convert snake_case to StudlyCase method segment
     private static toStudlyCase(key: string): string {
@@ -1268,8 +1582,285 @@ export abstract class Model {
         return this.belongsTo(modelConstructor, morphId);
     }
 
-    // Enhanced persistence methods
+    // Update the save method to include events
     async save(options: { force?: boolean } = {}): Promise<this> {
+        const staticClass = this.constructor as typeof Model & {
+            table: string;
+            primaryKey: string;
+            timestamps?: boolean;
+            autoIncrement?: boolean;
+        };
+
+        // Fire saving event
+        const savingResult = await staticClass.fireModelEvent('saving', this, true);
+        if (savingResult === false) {
+            return this;
+        }
+
+        // Fire creating/updating events
+        if (!this.__exists) {
+            const creatingResult = await staticClass.fireModelEvent('creating', this, true);
+            if (creatingResult === false) {
+                return this;
+            }
+        } else {
+            const updatingResult = await staticClass.fireModelEvent('updating', this, true);
+            if (updatingResult === false) {
+                return this;
+            }
+        }
+
+        // Original save logic here...
+        const table = staticClass.getTable();
+        const primaryKey = staticClass.primaryKey || 'id';
+        const now = new Date();
+
+        if ((staticClass as any).timestamps) {
+            if (!this.getAttribute('created_at')) {
+                this.setAttribute('created_at', now);
+            }
+            this.setAttribute('updated_at', now);
+        }
+
+        const attrs = { ...this.attributes } as any;
+        const id = attrs[primaryKey];
+        const exists = this.__exists;
+        const isMongo = getDbType() === 'mongodb';
+
+        const doInsert =
+            !exists || options.force || (id === undefined && (staticClass as any).autoIncrement);
+
+        if (isMongo) {
+            const c = mongoCollection(table);
+            const normalizeForeignIds = (obj: Record<string, any>) => {
+                Object.keys(obj).forEach((k) => {
+                    if (!k || !k.endsWith('_id')) return;
+                    const v = obj[k];
+                    if (v === undefined || v === null) return;
+                    try {
+                        if (v instanceof ObjectId) {
+                            obj[k] = v;
+                            return;
+                        }
+                        const str = String(v);
+                        if (/^[0-9a-fA-F]{24}$/.test(str)) {
+                            obj[k] = new ObjectId(str);
+                        } else {
+                            obj[k] = str;
+                        }
+                    } catch {
+                        obj[k] = String(v);
+                    }
+                });
+            };
+
+            if (doInsert) {
+                const doc: any = { ...attrs };
+                if (primaryKey === 'id') {
+                    if (doc.id) {
+                        try {
+                            doc._id = new ObjectId(String(doc.id));
+                        } catch {
+                            doc._id = doc.id;
+                        }
+                        delete doc.id;
+                    }
+                }
+                normalizeForeignIds(doc);
+                const res = await c.insertOne(doc);
+                if (primaryKey === 'id') this.setAttribute('id', String(res.insertedId));
+                this.__exists = true;
+
+                // Fire created event
+                await staticClass.fireModelEvent('created', this);
+            } else {
+                const dirty = this.getDirty();
+                const setDoc: any = {};
+                Object.keys(dirty).forEach((k) => {
+                    if (k === primaryKey && primaryKey === 'id') return;
+                    setDoc[k] = dirty[k];
+                });
+                if (Object.keys(setDoc).length) {
+                    normalizeForeignIds(setDoc);
+                    const filter: any =
+                        primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id };
+                    await c.updateOne(filter, { $set: setDoc });
+
+                    // Fire updated event
+                    await staticClass.fireModelEvent('updated', this);
+                }
+            }
+            this.original = { ...this.attributes };
+
+            // Fire saved event
+            await staticClass.fireModelEvent('saved', this);
+
+            return this;
+        }
+
+        // SQL implementation with events
+        const normalizeSqlParam = (val: any) => {
+            if (val === undefined) return undefined as any;
+            if (val === null) return null as any;
+            if (val instanceof Date || Buffer.isBuffer(val)) return val;
+            try {
+                const maybeObjId =
+                    (val as any)?._bsontype === 'ObjectID' ||
+                    (typeof ObjectId !== 'undefined' && val instanceof ObjectId);
+                if (maybeObjId) return String(val);
+            } catch {}
+            const t = typeof val;
+            if (t === 'object') {
+                try {
+                    return JSON.stringify(val);
+                } catch {
+                    return String(val);
+                }
+            }
+            return val;
+        };
+
+        if (doInsert) {
+            const insertCols = Object.keys(attrs).filter(
+                (k) => attrs[k] !== undefined && (k !== primaryKey || !(staticClass as any).autoIncrement),
+            );
+            const placeholders = insertCols.map(() => '?').join(',');
+            const sql = `INSERT INTO ${table} (${insertCols.join(',')}) VALUES (${placeholders})`;
+            const params = insertCols.map((c) => normalizeSqlParam(attrs[c]));
+            const result: any = await dbQuery<any>(sql, params);
+            if ((staticClass as any).autoIncrement && result && result.insertId !== undefined) {
+                this.setAttribute(primaryKey, result.insertId);
+            }
+            this.__exists = true;
+
+            // Fire created event
+            await staticClass.fireModelEvent('created', this);
+        } else {
+            const dirty = this.getDirty();
+            const setCols = Object.keys(dirty).filter((k) => k !== primaryKey);
+            if (setCols.length) {
+                const setSql = setCols.map((c) => `${c} = ?`).join(', ');
+                const sql = `UPDATE ${table} SET ${setSql} WHERE ${primaryKey} = ?`;
+                const params = [...setCols.map((c) => normalizeSqlParam(dirty[c])), id];
+                await dbQuery<any>(sql, params);
+
+                // Fire updated event
+                await staticClass.fireModelEvent('updated', this);
+            }
+        }
+
+        this.original = { ...this.attributes };
+
+        // Fire saved event
+        await staticClass.fireModelEvent('saved', this);
+
+        return this;
+    }
+
+    // Update delete method to include events
+    async delete(force: boolean = false): Promise<boolean> {
+        const staticClass = this.constructor as typeof Model & {
+            table: string;
+            primaryKey: string;
+            softDeletes?: boolean;
+        };
+
+        // Fire deleting event
+        const deletingResult = await staticClass.fireModelEvent('deleting', this, true);
+        if (deletingResult === false) {
+            return false;
+        }
+
+        const table = staticClass.getTable();
+        const primaryKey = staticClass.primaryKey || 'id';
+        const id = this.getAttribute(primaryKey);
+        if (id === undefined || id === null) return false;
+
+        let result = false;
+
+        if (getDbType() === 'mongodb') {
+            const c = mongoCollection(table);
+            if ((staticClass as any).softDeletes && !force) {
+                await c.updateOne(
+                    primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+                    { $set: { deleted_at: new Date() } },
+                );
+                this.setAttribute('deleted_at', new Date());
+                result = true;
+            } else {
+                await c.deleteOne(
+                    primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+                );
+                result = true;
+            }
+        } else {
+            if ((staticClass as any).softDeletes && !force) {
+                const now = new Date();
+                this.setAttribute('deleted_at', now);
+                const sql = `UPDATE ${table} SET deleted_at = ? WHERE ${primaryKey} = ?`;
+                await dbQuery<any>(sql, [now, id]);
+                result = true;
+            } else {
+                const sql = `DELETE FROM ${table} WHERE ${primaryKey} = ?`;
+                await dbQuery<any>(sql, [id]);
+                result = true;
+            }
+        }
+
+        if (result) {
+            // Fire deleted event
+            await staticClass.fireModelEvent('deleted', this);
+        }
+
+        return result;
+    }
+
+    // Update restore method to include events
+    async restore(): Promise<boolean> {
+        const staticClass = this.constructor as typeof Model & {
+            table: string;
+            primaryKey: string;
+            softDeletes?: boolean;
+        };
+        if (!(staticClass as any).softDeletes) return false;
+
+        // Fire restoring event
+        const restoringResult = await staticClass.fireModelEvent('restoring', this, true);
+        if (restoringResult === false) {
+            return false;
+        }
+
+        const table = staticClass.getTable();
+        const primaryKey = staticClass.primaryKey || 'id';
+        const id = this.getAttribute(primaryKey);
+        if (id === undefined || id === null) return false;
+
+        this.setAttribute('deleted_at', null);
+
+        let result = false;
+
+        if (getDbType() === 'mongodb') {
+            const c = mongoCollection(table);
+            await c.updateOne(
+                primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+                { $set: { deleted_at: null } },
+            );
+            result = true;
+        } else {
+            const sql = `UPDATE ${table} SET deleted_at = NULL WHERE ${primaryKey} = ?`;
+            await dbQuery<any>(sql, [id]);
+            result = true;
+        }
+
+        if (result) {
+            // Fire restored event
+            await staticClass.fireModelEvent('restored', this);
+        }
+
+        return result;
+    }
+    // Enhanced persistence methods
+    async save_(options: { force?: boolean } = {}): Promise<this> {
         const staticClass = this.constructor as typeof Model & {
             table: string;
             primaryKey: string;
@@ -1416,7 +2007,7 @@ export abstract class Model {
         return this.save();
     }
 
-    async delete(force: boolean = false): Promise<boolean> {
+    async delete_(force: boolean = false): Promise<boolean> {
         const staticClass = this.constructor as typeof Model & {
             table: string;
             primaryKey: string;
@@ -1457,7 +2048,7 @@ export abstract class Model {
         }
     }
 
-    async restore(): Promise<boolean> {
+    async restore_(): Promise<boolean> {
         const staticClass = this.constructor as typeof Model & {
             table: string;
             primaryKey: string;
@@ -1540,8 +2131,17 @@ export abstract class Model {
         return created;
     }
 
-    static query<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
+    static query_<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
         return new EloquentBuilder<InstanceType<M>>(this as any);
+    }
+
+    static query<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
+        // Ensure the model is booted (traits/scopes/macros applied) on first use
+        this.ensureBooted();
+        const builder = new EloquentBuilder<InstanceType<M>>(this as any);
+
+        // Apply global scopes
+        return this.applyScopes(builder);
     }
 
     static with<M extends typeof Model>(
@@ -1849,3 +2449,5 @@ export abstract class Model {
         return { before, after, keys, count: keys.length };
     }
 }
+Model.boot();
+
