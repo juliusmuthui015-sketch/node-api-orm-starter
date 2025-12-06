@@ -42,86 +42,51 @@ export function getTrait(name: string): Trait | undefined {
 export function applyTraits(modelClass: typeof Model, traitNames: string[]): void {
     for (const traitName of traitNames) {
         let trait: Trait | undefined;
-        try {
-            trait = traitRegistry.get(traitName);
-        } catch (e) {
-            console.warn(`Error retrieving trait "${traitName}":`, e);
-            continue;
-        }
+        trait = traitRegistry.get(traitName);
         if (!trait) {
-            console.warn(`Trait "${traitName}" not found`);
-            continue;
+            throw new Error(`Trait "${traitName}" not found`);
         }
 
         // Apply methods
-        try {
-            if (trait.methods) {
-                Object.entries(trait.methods).forEach(([methodName, method]) => {
-                    try {
-                        if (!(methodName in modelClass.prototype)) {
-                            modelClass.prototype[methodName] = method;
-                        } else {
-                            // Avoid overriding existing methods
-                            console.warn(`Trait method "${traitName}.${methodName}" skipped: already exists on model.`);
-                        }
-                    } catch (e) {
-                        console.warn(`Failed applying method "${traitName}.${methodName}":`, e);
-                    }
-                });
-            }
-        } catch (e) {
-            console.warn(`Error while applying methods of trait "${traitName}":`, e);
+        if (trait.methods) {
+            Object.entries(trait.methods).forEach(([methodName, method]) => {
+                if (!(methodName in modelClass.prototype)) {
+                    modelClass.prototype[methodName] = method;
+                } else {
+                    // Avoid overriding existing methods
+                    console.warn(`Trait method "${traitName}.${methodName}" skipped: already exists on model.`);
+                }
+            });
         }
 
         // Apply scopes
-        try {
-            if (trait.scope) {
-                Object.entries(trait.scope).forEach(([scopeName, scopeMethod]) => {
-                    const staticMethodName = `scope${scopeName.charAt(0).toUpperCase() + scopeName.slice(1)}`;
-                    try {
-                        if (!(staticMethodName in modelClass)) {
-                            (modelClass as any)[staticMethodName] = scopeMethod;
-                        } else {
-                            console.warn(`Trait scope "${traitName}.${staticMethodName}" skipped: already exists on model.`);
-                        }
-                    } catch (e) {
-                        console.warn(`Failed applying scope "${traitName}.${staticMethodName}":`, e);
-                    }
-                });
-            }
-        } catch (e) {
-            console.warn(`Error while applying scopes of trait "${traitName}":`, e);
+        if (trait.scope) {
+            Object.entries(trait.scope).forEach(([scopeName, scopeMethod]) => {
+                const staticMethodName = `scope${scopeName.charAt(0).toUpperCase() + scopeName.slice(1)}`;
+                if (!(staticMethodName in modelClass)) {
+                    (modelClass as any)[staticMethodName] = scopeMethod;
+                } else {
+                    console.warn(`Trait scope "${traitName}.${staticMethodName}" skipped: already exists on model.`);
+                }
+            });
         }
 
         // Apply macros
-        try {
-            if (trait.macros) {
-                Object.entries(trait.macros).forEach(([macroName, macro]) => {
-                    try {
-                        if (!(macroName in modelClass)) {
-                            (modelClass as any)[macroName] = macro;
-                        } else {
-                            console.warn(`Trait macro "${traitName}.${macroName}" skipped: already exists on model.`);
-                        }
-                        if (!(macroName in EloquentBuilder.prototype)) {
-                            (EloquentBuilder.prototype as any)[macroName] = macro;
-                        }
-                    } catch (e) {
-                        console.warn(`Failed applying macro "${traitName}.${macroName}":`, e);
-                    }
-                });
-            }
-        } catch (e) {
-            console.warn(`Error while applying macros of trait "${traitName}":`, e);
+        if (trait.macros) {
+            Object.entries(trait.macros).forEach(([macroName, macro]) => {
+                if (!(macroName in modelClass)) {
+                    (modelClass as any)[macroName] = macro;
+                } else {
+                    console.warn(`Trait macro "${traitName}.${macroName}" skipped: already exists on model.`);
+                }
+                if (!(macroName in EloquentBuilder.prototype)) {
+                    (EloquentBuilder.prototype as any)[macroName] = macro;
+                }
+            });
         }
 
-        // Boot trait
-        try {
-            if (trait.boot) {
-                trait.boot(modelClass);
-            }
-        } catch (e) {
-            console.warn(`Error booting trait "${traitName}":`, e);
+        if (trait.boot) {
+            trait.boot(modelClass);
         }
     }
 }
