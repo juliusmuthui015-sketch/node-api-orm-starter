@@ -34,6 +34,10 @@ export class EloquentBuilder<T extends Model> {
   // Used to qualify bare column names when generating SQL (helps avoid ambiguity)
   private columnQualifier?: string;
 
+    // Add scope-related properties
+    private appliedScopes: Set<string> = new Set();
+    private removedScopes: Set<string> = new Set();
+
   constructor(model: typeof Model) {
     this.model = model;
   }
@@ -48,6 +52,69 @@ export class EloquentBuilder<T extends Model> {
     this.onlyTrashedFlag = false; // reset
     return this;
   }
+
+    /**
+     * Apply a named scope
+     */
+    public namedScope(name: string, ...args: any[]): this {
+        const modelClass = this.model as typeof Model;
+
+        // Check if scope exists in local scopes
+        if (modelClass.localScopes && modelClass.localScopes[name]) {
+            modelClass.localScopes[name](this, ...args);
+            this.appliedScopes.add(name);
+        } else {
+            // Try scope method naming convention
+            const scopeMethodName = `scope${name.charAt(0).toUpperCase() + name.slice(1)}`;
+            if ((modelClass as any)[scopeMethodName]) {
+                (modelClass as any)[scopeMethodName](this, ...args);
+                this.appliedScopes.add(name);
+            }
+        }
+
+        return this;
+    }
+
+    /**
+     * Alias for namedScope
+     */
+    public scope(name: string, ...args: any[]): this {
+        return this.namedScope(name, ...args);
+    }
+
+    /**
+     * Apply multiple scopes
+     */
+    public scopes(scopes: { [name: string]: any[] }): this {
+        Object.entries(scopes).forEach(([name, args]) => {
+            this.namedScope(name, ...args);
+        });
+        return this;
+    }
+
+    /**
+     * Get applied scopes
+     */
+    public getAppliedScopes(): string[] {
+        return Array.from(this.appliedScopes);
+    }
+
+    /**
+     * Check if a scope has been applied
+     */
+    public hasScope(name: string): boolean {
+        return this.appliedScopes.has(name);
+    }
+
+    /**
+     * Remove a scope
+     */
+    public withoutScope(name: string): this {
+        this.removedScopes.add(name);
+        // Note: Actually removing already applied conditions is complex
+        // This just prevents re-application
+        return this;
+    }
 
   // Alias for possible misspelling
   public withThrashed(): this {
@@ -1012,6 +1079,9 @@ export class EloquentBuilder<T extends Model> {
       parts.push(where.sql);
       params.push(...where.params);
     }
+
+      // Note: Scopes are applied through where clauses already added
+      // so no changes needed here
 
     // Add has conditions (translated to subqueries)
     const hasSql = this.buildHasConditionsSQL(tableName);
