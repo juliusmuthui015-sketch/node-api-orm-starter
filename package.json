@@ -18,7 +18,9 @@
     "route:list": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tools/route-list.ts",
     "cache:cli": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tools/cache-cli.ts",
     "smoke:redis": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tmp/redis-cache-smoke.ts",
-    "key:generate": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tools/key-generate.ts"
+    "key:generate": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tools/key-generate.ts",
+    "smoke:traits": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tmp/traits-scopes-accessors-smoke.ts",
+    "smoke:scopes": "ts-node-dev -r tsconfig-paths/register --transpile-only src/tmp/scopes-smoke.ts"
   },
   "keywords": [],
   "author": "",
