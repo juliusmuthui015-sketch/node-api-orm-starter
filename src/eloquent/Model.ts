@@ -6,9 +6,74 @@ import { query as dbQuery, getDbType, collection as mongoCollection } from '@/co
 import util from 'util';
 import { ObjectId } from 'mongodb';
 import {AccessorDescriptor, ModelEvents, MutatorDescriptor, ToJSONOptions} from "@/eloquent/model_interfaces";
-import {applyTraits, ScopeMethod} from "@/eloquent/Traits/traits";
+import {applyTraits, ClassBasedTrait, ScopeMethod} from "@/eloquent/Traits/traits";
 
-export abstract class Model {
+
+// Type guard for class-based traits
+function isClassBasedTrait(traitRef: any): traitRef is ClassBasedTrait {
+    return typeof traitRef === 'function' && traitRef.prototype && traitRef.prototype.constructor === traitRef;
+}
+
+// Decorator for marking trait usage
+export function use(...traitClasses: ClassBasedTrait[]): ClassDecorator {
+    return function (constructor: Function) {
+        const modelClass = constructor as typeof Model;
+
+        // Ensure traits array exists
+        if (!modelClass.traits) {
+            modelClass.traits = [];
+        }
+
+        // Add trait classes to the model
+        traitClasses.forEach(traitClass => {
+            // Convert class to string identifier for storage
+            const traitIdentifier = traitClass.name;
+            if (!modelClass.traits.includes(traitIdentifier)) {
+                modelClass.traits.push(traitIdentifier);
+            }
+
+            // Store the class reference for later application
+            if (!(modelClass as any).__traitClasses) {
+                (modelClass as any).__traitClasses = [];
+            }
+            (modelClass as any).__traitClasses.push(traitClass);
+        });
+    };
+}
+
+// Helper to automatically detect and apply traits from class properties
+function autoDetectTraits(modelClass: typeof Model): void {
+    // Check for static 'use' property (Laravel style)
+    if ((modelClass as any)._use && Array.isArray((modelClass as any)._use)) {
+        (modelClass as any)._use.forEach((traitClass: ClassBasedTrait) => {
+            if (!modelClass.traits.includes(traitClass.name)) {
+                modelClass.traits.push(traitClass.name);
+            }
+            if (!(modelClass as any).__traitClasses) {
+                (modelClass as any).__traitClasses = [];
+            }
+            (modelClass as any).__traitClasses.push(traitClass);
+        });
+    }
+
+    // Also check instance properties that might be traits
+    const instanceProperties = Object.getOwnPropertyNames(modelClass.prototype);
+    instanceProperties.forEach(prop => {
+        if (prop === 'constructor') return;
+        const descriptor = Object.getOwnPropertyDescriptor(modelClass.prototype, prop);
+        if (descriptor && descriptor.value && isClassBasedTrait(descriptor.value)) {
+            const traitClass = descriptor.value;
+            if (!modelClass.traits.includes(traitClass.name)) {
+                modelClass.traits.push(traitClass.name);
+            }
+            if (!(modelClass as any).__traitClasses) {
+                (modelClass as any).__traitClasses = [];
+            }
+            (modelClass as any).__traitClasses.push(traitClass);
+        }
+    });
+}
+export abstract class Model{
     [key: string]: any;
 
     static table: string = '';
@@ -24,7 +89,7 @@ export abstract class Model {
     static autoIncrement: boolean = true;
 
 
-    // New static properties for traits and scopes
+    // Trait and scope properties
     static traits: string[] = [];
     static localScopes: { [name: string]: ScopeMethod<any> } = {};
     static globalScopes: { [name: string]: (builder: EloquentBuilder<any>) => void } = {};
@@ -45,9 +110,15 @@ export abstract class Model {
         retrieved: [],
     };
 
+    // Laravel-style trait usage
+    static _use?: ClassBasedTrait[] = [];
+
     // New static properties for accessors/mutators
     private static _accessors: Map<string, AccessorDescriptor> = new Map();
     private static _mutators: Map<string, MutatorDescriptor> = new Map();
+
+    // Private trait storage
+    static __traitClasses: ClassBasedTrait[] = [];
 
     id?: number | string;
     created_at?: Date;
@@ -124,18 +195,10 @@ export abstract class Model {
         const staticClass = this.constructor as typeof Model;
 
         // Initialize static properties if not already done
-        if (!staticClass.traits) {
-            staticClass.traits = [];
-        }
-        if (!staticClass.localScopes) {
-            staticClass.localScopes = {};
-        }
-        if (!staticClass.globalScopes) {
-            staticClass.globalScopes = {};
-        }
-        if (!staticClass.withoutGlobalScopes) {
-            staticClass.withoutGlobalScopes = [];
-        }
+        if (!staticClass.traits) staticClass.traits = [];
+        if (!staticClass.localScopes) staticClass.localScopes = {};
+        if (!staticClass.globalScopes) staticClass.globalScopes = {};
+        if (!staticClass.withoutGlobalScopes) staticClass.withoutGlobalScopes = [];
         if (!staticClass.eventListeners) {
             staticClass.eventListeners = {
                 creating: [],
@@ -152,9 +215,22 @@ export abstract class Model {
             };
         }
 
+        // Auto-detect traits from static properties
+        autoDetectTraits(staticClass);
+
         // Apply traits to the class (once per class)
         if ((staticClass as any).__traitsApplied !== true) {
-            applyTraits(staticClass, staticClass.traits);
+            // Combine string trait names and class-based traits
+            const allTraits: Array<string | ClassBasedTrait> = [...staticClass.traits];
+            if ((staticClass as any).__traitClasses) {
+                allTraits.push(...(staticClass as any).__traitClasses);
+            }
+
+            try {
+                applyTraits(staticClass, allTraits);
+            } catch (e) {
+                console.warn(`Failed to apply traits for ${staticClass.name}:`, e);
+            }
             (staticClass as any).__traitsApplied = true;
         }
     }
@@ -282,6 +358,23 @@ export abstract class Model {
     }
 
     /**
+     * Static method to register an event listener (chainable alternative to addEventListener)
+     * @param event The event name to listen to
+     * @param callback The callback function to execute when the event is triggered
+     * @returns The Model class for chaining
+     */
+    static on(
+        event: keyof ModelEvents,
+        callback: (model: Model) => boolean | void | Promise<boolean | void>
+    ): typeof Model {
+        if (!this.prototype.eventListeners[event]) {
+            this.prototype.eventListeners[event] = [];
+        }
+        this.prototype.eventListeners[event].push(callback);
+        return this;
+    }
+
+    /**
      * Dispatch an event
      */
     static async dispatchEvent(event: keyof ModelEvents, model: Model): Promise<void> {
@@ -333,7 +426,9 @@ export abstract class Model {
     static ensureBooted(): void {
         const self = this as typeof Model & {
             __traitsApplied?: boolean;
+            __traitClasses?: ClassBasedTrait[];
         };
+
         // Initialize static containers if missing
         if (!self.traits) self.traits = [];
         if (!self.localScopes) self.localScopes = {} as any;
@@ -354,9 +449,20 @@ export abstract class Model {
                 retrieved: [],
             } as any;
         }
+
+        // Auto-detect traits
+        autoDetectTraits(self);
+
         if (self.__traitsApplied === true) return;
+
+        // Combine string trait names and class-based traits
+        const allTraits: Array<string | ClassBasedTrait> = [...self.traits];
+        if (self.__traitClasses) {
+            allTraits.push(...self.__traitClasses);
+        }
+
         try {
-            applyTraits(self, self.traits || []);
+            applyTraits(self, allTraits);
         } catch (e) {
             console.warn(`Failed to apply traits for ${self.name}:`, e);
         }
@@ -2155,211 +2261,211 @@ export abstract class Model {
         return this.query<M>().withTrashed();
     }
 
-    // Alias accommodating typo 'withThrashed'
-    static withThrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
-        return this.withTrashed<M>();
+  // Alias accommodating typo 'withThrashed'
+  static withThrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
+    return this.withTrashed<M>();
+  }
+
+  static withoutTrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
+    return this.query<M>().withoutTrashed();
+  }
+
+  // Alias accommodating typo 'withoutThrashed'
+  static withoutThrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
+    return this.withoutTrashed<M>();
+  }
+
+  static onlyTrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
+    return this.query<M>().onlyTrashed();
+  }
+
+  static onlyThrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
+    return this.onlyTrashed<M>();
+  }
+
+  static where<M extends typeof Model>(
+    this: M,
+    column: string,
+    operator: any,
+    value?: any,
+  ): EloquentBuilder<InstanceType<M>> {
+    return this.query<M>().where(column, operator, value) as EloquentBuilder<InstanceType<M>>;
+  }
+
+  static find<M extends typeof Model>(
+    this: M,
+    id: number | string,
+  ): Promise<InstanceType<M> | null> {
+    return this.query<M>()
+      .where((this as any).primaryKey, id)
+      .first() as Promise<InstanceType<M> | null>;
+  }
+
+  static async findOrFail<M extends typeof Model>(
+    this: M,
+    id: number | string,
+  ): Promise<InstanceType<M>> {
+    const found = await this.find(id);
+    if (!found) throw new Error(`${(this as any).name || 'Model'} not found`);
+    return found as InstanceType<M>;
+  }
+
+  static all<M extends typeof Model>(this: M): Promise<InstanceType<M>[]> {
+    return this.query<M>().get() as Promise<InstanceType<M>[]>;
+  }
+
+  static first<M extends typeof Model>(this: M): Promise<InstanceType<M> | null> {
+    return this.query<M>().first() as Promise<InstanceType<M> | null>;
+  }
+
+  // Static table name resolution
+  static getTable(): string {
+    // If table name is explicitly set, use it
+    if (this.table && this.table !== '') {
+      return this.table;
     }
 
-    static withoutTrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
-        return this.query<M>().withoutTrashed();
+    // Generate table name from class name
+    let tableName = this.name;
+
+    // Convert PascalCase to snake_case
+    tableName = tableName
+      .replace(/([A-Z])/g, '_$1')
+      .toLowerCase()
+      .replace(/^_/, '');
+
+    // Pluralize
+    tableName = this.pluralize(tableName);
+
+    return tableName;
+  }
+
+  // Utility methods
+  private castAttribute(key: string, value: any): any {
+    const staticClass = this.constructor as typeof Model;
+    const castType = staticClass.casts[key];
+    if (typeof castType === 'function') {
+      return castType(value);
+    }
+    switch (castType) {
+      case 'int':
+      case 'integer':
+        return parseInt(value, 10);
+      case 'real':
+      case 'float':
+      case 'double':
+        return parseFloat(value);
+      case 'string':
+        return String(value);
+      case 'bool':
+      case 'boolean':
+        return Boolean(value);
+      case 'object':
+      case 'array':
+        return JSON.parse(value);
+      case 'json':
+        return typeof value === 'string' ? JSON.parse(value) : value;
+      case 'date':
+      case 'datetime':
+        return new Date(value);
+      case 'timestamp':
+        return new Date(value).getTime();
+      case 'collection':
+        return new Map(Object.entries(value));
+      default:
+        return value;
+    }
+  }
+
+  protected getPrimaryKey(): string {
+    return (this.constructor as typeof Model).primaryKey;
+  }
+
+  // Static pluralization method
+  private static pluralize(word: string): string {
+    // Comprehensive irregular plurals
+    const irregularPlurals: Record<string, string> = {
+      // Common irregulars
+      person: 'people',
+      man: 'men',
+      woman: 'women',
+      child: 'children',
+      foot: 'feet',
+      tooth: 'teeth',
+      goose: 'geese',
+      mouse: 'mice',
+      louse: 'lice',
+      ox: 'oxen',
+      die: 'dice',
+      penny: 'pence',
+
+      // Latin/Greek plurals
+      appendix: 'appendices',
+      index: 'indices',
+      matrix: 'matrices',
+      vertex: 'vertices',
+      crisis: 'crises',
+      analysis: 'analyses',
+      thesis: 'theses',
+      criterion: 'criteria',
+      phenomenon: 'phenomena',
+      datum: 'data',
+      medium: 'media',
+      bacterium: 'bacteria',
+      curriculum: 'curricula',
+      stimulus: 'stimuli',
+      alumnus: 'alumni',
+      focus: 'foci',
+      nucleus: 'nuclei',
+      syllabus: 'syllabi',
+      fungus: 'fungi',
+      cactus: 'cacti',
+
+      // Unchanging plurals
+      sheep: 'sheep',
+      deer: 'deer',
+      fish: 'fish',
+      species: 'species',
+      aircraft: 'aircraft',
+      series: 'series',
+      means: 'means',
+    };
+
+    // Uncountable nouns (stay the same)
+    const uncountable = new Set([
+      'equipment',
+      'information',
+      'rice',
+      'money',
+      'species',
+      'series',
+      'fish',
+      'sheep',
+      'deer',
+      'aircraft',
+      'news',
+      'education',
+    ]);
+
+    const lowerWord = word.toLowerCase();
+
+    // Check for uncountable nouns
+    if (uncountable.has(lowerWord)) {
+      return word;
     }
 
-    // Alias accommodating typo 'withoutThrashed'
-    static withoutThrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
-        return this.withoutTrashed<M>();
+    // Check for irregular plurals
+    if (irregularPlurals[lowerWord]) {
+      // Preserve case
+      if (word === word.toUpperCase()) {
+        return irregularPlurals[lowerWord].toUpperCase();
+      } else if (word[0] === word[0].toUpperCase()) {
+        return (
+          irregularPlurals[lowerWord].charAt(0).toUpperCase() + irregularPlurals[lowerWord].slice(1)
+        );
+      }
+      return irregularPlurals[lowerWord];
     }
-
-    static onlyTrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
-        return this.query<M>().onlyTrashed();
-    }
-
-    static onlyThrashed<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
-        return this.onlyTrashed<M>();
-    }
-
-    static where<M extends typeof Model>(
-        this: M,
-        column: string,
-        operator: any,
-        value?: any,
-    ): EloquentBuilder<InstanceType<M>> {
-        return this.query<M>().where(column, operator, value) as EloquentBuilder<InstanceType<M>>;
-    }
-
-    static find<M extends typeof Model>(
-        this: M,
-        id: number | string,
-    ): Promise<InstanceType<M> | null> {
-        return this.query<M>()
-            .where((this as any).primaryKey, id)
-            .first() as Promise<InstanceType<M> | null>;
-    }
-
-    static async findOrFail<M extends typeof Model>(
-        this: M,
-        id: number | string,
-    ): Promise<InstanceType<M>> {
-        const found = await this.find(id);
-        if (!found) throw new Error(`${(this as any).name || 'Model'} not found`);
-        return found as InstanceType<M>;
-    }
-
-    static all<M extends typeof Model>(this: M): Promise<InstanceType<M>[]> {
-        return this.query<M>().get() as Promise<InstanceType<M>[]>;
-    }
-
-    static first<M extends typeof Model>(this: M): Promise<InstanceType<M> | null> {
-        return this.query<M>().first() as Promise<InstanceType<M> | null>;
-    }
-
-    // Static table name resolution
-    static getTable(): string {
-        // If table name is explicitly set, use it
-        if (this.table && this.table !== '') {
-            return this.table;
-        }
-
-        // Generate table name from class name
-        let tableName = this.name;
-
-        // Convert PascalCase to snake_case
-        tableName = tableName
-            .replace(/([A-Z])/g, '_$1')
-            .toLowerCase()
-            .replace(/^_/, '');
-
-        // Pluralize
-        tableName = this.pluralize(tableName);
-
-        return tableName;
-    }
-
-    // Utility methods
-    private castAttribute(key: string, value: any): any {
-        const staticClass = this.constructor as typeof Model;
-        const castType = staticClass.casts[key];
-        if (typeof castType === 'function') {
-            return castType(value);
-        }
-        switch (castType) {
-            case 'int':
-            case 'integer':
-                return parseInt(value, 10);
-            case 'real':
-            case 'float':
-            case 'double':
-                return parseFloat(value);
-            case 'string':
-                return String(value);
-            case 'bool':
-            case 'boolean':
-                return Boolean(value);
-            case 'object':
-            case 'array':
-                return JSON.parse(value);
-            case 'json':
-                return typeof value === 'string' ? JSON.parse(value) : value;
-            case 'date':
-            case 'datetime':
-                return new Date(value);
-            case 'timestamp':
-                return new Date(value).getTime();
-            case 'collection':
-                return new Map(Object.entries(value));
-            default:
-                return value;
-        }
-    }
-
-    protected getPrimaryKey(): string {
-        return (this.constructor as typeof Model).primaryKey;
-    }
-
-    // Static pluralization method
-    private static pluralize(word: string): string {
-        // Comprehensive irregular plurals
-        const irregularPlurals: Record<string, string> = {
-            // Common irregulars
-            person: 'people',
-            man: 'men',
-            woman: 'women',
-            child: 'children',
-            foot: 'feet',
-            tooth: 'teeth',
-            goose: 'geese',
-            mouse: 'mice',
-            louse: 'lice',
-            ox: 'oxen',
-            die: 'dice',
-            penny: 'pence',
-
-            // Latin/Greek plurals
-            appendix: 'appendices',
-            index: 'indices',
-            matrix: 'matrices',
-            vertex: 'vertices',
-            crisis: 'crises',
-            analysis: 'analyses',
-            thesis: 'theses',
-            criterion: 'criteria',
-            phenomenon: 'phenomena',
-            datum: 'data',
-            medium: 'media',
-            bacterium: 'bacteria',
-            curriculum: 'curricula',
-            stimulus: 'stimuli',
-            alumnus: 'alumni',
-            focus: 'foci',
-            nucleus: 'nuclei',
-            syllabus: 'syllabi',
-            fungus: 'fungi',
-            cactus: 'cacti',
-
-            // Unchanging plurals
-            sheep: 'sheep',
-            deer: 'deer',
-            fish: 'fish',
-            species: 'species',
-            aircraft: 'aircraft',
-            series: 'series',
-            means: 'means',
-        };
-
-        // Uncountable nouns (stay the same)
-        const uncountable = new Set([
-            'equipment',
-            'information',
-            'rice',
-            'money',
-            'species',
-            'series',
-            'fish',
-            'sheep',
-            'deer',
-            'aircraft',
-            'news',
-            'education',
-        ]);
-
-        const lowerWord = word.toLowerCase();
-
-        // Check for uncountable nouns
-        if (uncountable.has(lowerWord)) {
-            return word;
-        }
-
-        // Check for irregular plurals
-        if (irregularPlurals[lowerWord]) {
-            // Preserve case
-            if (word === word.toUpperCase()) {
-                return irregularPlurals[lowerWord].toUpperCase();
-            } else if (word[0] === word[0].toUpperCase()) {
-                return (
-                    irregularPlurals[lowerWord].charAt(0).toUpperCase() + irregularPlurals[lowerWord].slice(1)
-                );
-            }
-            return irregularPlurals[lowerWord];
-        }
 
         // Pluralization rules in order of specificity
         const pluralRules = [
@@ -2448,6 +2554,40 @@ export abstract class Model {
         });
         return { before, after, keys, count: keys.length };
     }
+
+    static use<T1 extends ClassBasedTrait>(this: typeof Model, trait1: T1): AugmentedModel<typeof Model, [T1]>;
+    static use<T1 extends ClassBasedTrait, T2 extends ClassBasedTrait>(this: typeof Model, trait1: T1, trait2: T2): AugmentedModel<typeof Model, [T1, T2]>;
+    static use<T1 extends ClassBasedTrait, T2 extends ClassBasedTrait, T3 extends ClassBasedTrait>(this: typeof Model, trait1: T1, trait2: T2, trait3: T3): AugmentedModel<typeof Model, [T1, T2, T3]>;
+    static use<T1 extends ClassBasedTrait, T2 extends ClassBasedTrait, T3 extends ClassBasedTrait, T4 extends ClassBasedTrait>(this: typeof Model, trait1: T1, trait2: T2, trait3: T3, trait4: T4): AugmentedModel<typeof Model, [T1, T2, T3, T4]>;
+    static use<T1 extends ClassBasedTrait, T2 extends ClassBasedTrait, T3 extends ClassBasedTrait, T4 extends ClassBasedTrait, T5 extends ClassBasedTrait>(this: typeof Model, trait1: T1, trait2: T2, trait3: T3, trait4: T4, trait5: T5): AugmentedModel<typeof Model, [T1, T2, T3, T4, T5]>;
+    static use(this: typeof Model, ...traits: ClassBasedTrait[]): any {
+        applyTraits(this as any, traits);
+        return this as any;
+    }
 }
-Model.boot();
+
+
+// Helper types for augmenting Model with trait instance and static members
+type TraitInstance<T extends ClassBasedTrait> = Omit<InstanceType<T>, 'constructor'>;
+type TraitStatics<T extends ClassBasedTrait> = Omit<T, 'prototype'>;
+
+type MergeInstances<Traits extends readonly ClassBasedTrait[]> = Traits extends [infer A, ...infer Rest]
+    ? A extends ClassBasedTrait
+        ? Rest extends readonly ClassBasedTrait[]
+            ? TraitInstance<A> & MergeInstances<Rest>
+            : TraitInstance<A>
+        : {}
+    : {};
+
+type MergeStatics<Traits extends readonly ClassBasedTrait[]> = Traits extends [infer A, ...infer Rest]
+    ? A extends ClassBasedTrait
+        ? Rest extends readonly ClassBasedTrait[]
+            ? TraitStatics<A> & MergeStatics<Rest>
+            : TraitStatics<A>
+        : {}
+    : {};
+
+type AugmentedModel<C extends typeof Model, Traits extends readonly ClassBasedTrait[]> = {
+    new (...args: ConstructorParameters<C>): InstanceType<C> & MergeInstances<Traits>;
+} & C & MergeStatics<Traits>;
 
