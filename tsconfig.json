@@ -14,7 +14,9 @@
     "baseUrl": "./src",
     "paths": {
       "@/*": ["*"]
-    }
+    },
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false
   },
   "include": ["src"],
   "exclude": ["build", "node_modules"]
