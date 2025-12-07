@@ -1,6 +1,5 @@
 // traits.ts - New file for trait system
-
-// Types for trait support
+// traits.ts - Enhanced with class-based trait support
 import {Model} from "@/eloquent/Model";
 import {EloquentBuilder} from "@/eloquent/EloquentBuilder";
 
@@ -19,14 +18,30 @@ export interface Trait {
     macros?: { [name: string]: Function };
 }
 
+// Class-based trait interface
+export interface ClassBasedTrait {
+    new (): any;
+    boot?(model: typeof Model): void;
+    // __scopes?: Record<string, Function>;
+    // __macros?: Record<string, Function>;
+}
+
 // Global trait registry
 const traitRegistry = new Map<string, Trait>();
+const classTraitRegistry = new Map<Function, Trait>();
 
 /**
- * Register a trait globally
+ * Register a trait globally by name
  */
 export function registerTrait(name: string, trait: Trait): void {
     traitRegistry.set(name, trait);
+}
+
+/**
+ * Register a class-based trait
+ */
+export function registerClassTrait(traitClass: ClassBasedTrait, trait: Trait): void {
+    classTraitRegistry.set(traitClass, trait);
 }
 
 /**
@@ -37,14 +52,111 @@ export function getTrait(name: string): Trait | undefined {
 }
 
 /**
- * Apply traits to a model class
+ * Get a trait by class
  */
-export function applyTraits(modelClass: typeof Model, traitNames: string[]): void {
-    for (const traitName of traitNames) {
+export function getTraitByClass(traitClass: Function): Trait | undefined {
+    return classTraitRegistry.get(traitClass);
+}
+
+/**
+ * Convert a trait class to a Trait configuration
+ */
+function convertTraitClassToConfig(traitClass: ClassBasedTrait): Trait {
+    const traitConfig: Trait = {};
+    const instance = new traitClass();
+
+    // Collect instance methods
+    const methods: TraitMethods = {};
+    const prototype = Object.getPrototypeOf(instance);
+
+    // Get all methods from the trait class
+    const getAllMethods = (obj: any): string[] => {
+        const methods: string[] = [];
+        while (obj && obj !== Object.prototype) {
+            methods.push(...Object.getOwnPropertyNames(obj));
+            obj = Object.getPrototypeOf(obj);
+        }
+        return methods.filter(method => method !== 'constructor');
+    };
+
+    const methodNames = getAllMethods(prototype);
+    methodNames.forEach(methodName => {
+        if (typeof instance[methodName] === 'function') {
+            methods[methodName] = instance[methodName].bind(instance);
+        }
+    });
+
+    if (Object.keys(methods).length > 0) {
+        traitConfig.methods = methods;
+    }
+
+    // Check for static methods (scopes/macros)
+    const staticProperties = Object.getOwnPropertyNames(traitClass);
+    const scopeMethods: { [name: string]: ScopeMethod<any> } = {};
+    const macros: { [name: string]: Function } = {};
+
+    staticProperties.forEach(prop => {
+        if (prop === 'length' || prop === 'name' || prop === 'prototype') return;
+
+        const value = (traitClass as any)[prop];
+        if (typeof value === 'function') {
+            // Check if it's a scope method (starts with 'scope')
+            if (prop.startsWith('scope') && prop.length > 5) {
+                const scopeName = prop.charAt(5).toLowerCase() + prop.slice(6);
+                scopeMethods[scopeName] = value;
+            } else {
+                // Treat as macro
+                macros[prop] = value;
+            }
+        }
+    });
+
+    if (Object.keys(scopeMethods).length > 0) {
+        traitConfig.scope = scopeMethods;
+    }
+
+    if (Object.keys(macros).length > 0) {
+        traitConfig.macros = macros;
+    }
+
+    // Check for boot method
+    if (typeof (traitClass as any).boot === 'function') {
+        traitConfig.boot = (traitClass as any).boot;
+    }
+
+    // Also check for boot method on instance
+    if (typeof instance.boot === 'function') {
+        const originalBoot = traitConfig.boot;
+        traitConfig.boot = (model: typeof Model) => {
+            if (originalBoot) originalBoot(model);
+            instance.boot(model);
+        };
+    }
+
+    return traitConfig;
+}
+
+/**
+ * Apply traits to a model class (supports both string names and classes)
+ */
+export function applyTraits(modelClass: typeof Model, traitNamesOrClasses: Array<string | ClassBasedTrait>): void {
+    for (const traitRef of traitNamesOrClasses) {
         let trait: Trait | undefined;
-        trait = traitRegistry.get(traitName);
-        if (!trait) {
-            throw new Error(`Trait "${traitName}" not found`);
+
+        if (typeof traitRef === 'string') {
+            // String trait name
+            trait = traitRegistry.get(traitRef);
+            if (!trait) {
+                throw new Error(`Trait "${traitRef}" not found`);
+            }
+        } else {
+            // Class-based trait
+            trait = getTraitByClass(traitRef);
+            if (!trait) {
+                // Convert class to trait configuration
+                trait = convertTraitClassToConfig(traitRef);
+                registerClassTrait(traitRef, trait);
+            }
         }
 
         // Apply methods
@@ -54,7 +166,7 @@ export function applyTraits(modelClass: typeof Model, traitNames: string[]): voi
                     modelClass.prototype[methodName] = method;
                 } else {
                     // Avoid overriding existing methods
-                    console.warn(`Trait method "${traitName}.${methodName}" skipped: already exists on model.`);
+                    console.warn(`Trait method "${methodName}" skipped: already exists on model.`);
                 }
             });
         }
@@ -66,7 +178,7 @@ export function applyTraits(modelClass: typeof Model, traitNames: string[]): voi
                 if (!(staticMethodName in modelClass)) {
                     (modelClass as any)[staticMethodName] = scopeMethod;
                 } else {
-                    console.warn(`Trait scope "${traitName}.${staticMethodName}" skipped: already exists on model.`);
+                    console.warn(`Trait scope "${staticMethodName}" skipped: already exists on model.`);
                 }
             });
         }
@@ -77,7 +189,7 @@ export function applyTraits(modelClass: typeof Model, traitNames: string[]): voi
                 if (!(macroName in modelClass)) {
                     (modelClass as any)[macroName] = macro;
                 } else {
-                    console.warn(`Trait macro "${traitName}.${macroName}" skipped: already exists on model.`);
+                    console.warn(`Trait macro "${macroName}" skipped: already exists on model.`);
                 }
                 if (!(macroName in EloquentBuilder.prototype)) {
                     (EloquentBuilder.prototype as any)[macroName] = macro;
@@ -120,6 +232,89 @@ export function macro(name: string, callback: Function): void {
             }
         });
     }
+}
+
+
+/**
+ * Decorator for class-based traits
+ */
+export function trait(name?: string): ClassDecorator {
+    return function (constructor: Function): void {
+        const traitConfig = convertTraitClassToConfig(constructor as ClassBasedTrait);
+        if (name) {
+            registerTrait(name, traitConfig);
+        }
+        registerClassTrait(constructor as ClassBasedTrait, traitConfig);
+    };
+}
+
+/**
+ * Decorator for marking methods as scopes
+ * Usage:
+ * @scopeMethod()
+ * static scopeFindBySlug(builder: EloquentBuilder<any>, slug: string) { ... }
+ */
+export function scopeMethod(): MethodDecorator {
+    return function (
+        target: Object,
+        propertyKey: string | symbol,
+        descriptor: PropertyDescriptor
+    ): void {
+        if (typeof propertyKey === 'string') {
+            if (propertyKey.startsWith('scope') && propertyKey.length > 5) {
+                const scopeName = propertyKey.charAt(5).toLowerCase() + propertyKey.slice(6);
+                const ctor = (target as any).constructor as Function & { __scopes?: Record<string, Function> };
+                ctor.__scopes = ctor.__scopes || {};
+                ctor.__scopes[scopeName] = descriptor.value as Function;
+            }
+        }
+    };
+}
+
+/**
+ * Decorator for marking methods as macros
+ * Usage:
+ * @macroMethod()
+ * static cached(callback: Function, key: string, ttl: number) { ... }
+ */
+export function macroMethod(): MethodDecorator {
+    return function (
+        target: Object,
+        propertyKey: string | symbol,
+        descriptor: PropertyDescriptor
+    ): void {
+        if (typeof propertyKey === 'string') {
+            const ctor = (target as any).constructor as Function & { __macros?: Record<string, Function> };
+            ctor.__macros = ctor.__macros || {};
+            ctor.__macros[propertyKey] = descriptor.value as Function;
+        }
+    };
+}
+
+/**
+ * Alternative: Function-based decorators without TypeScript decorator metadata
+ * These work with older TypeScript versions or when decorator metadata is disabled
+ */
+
+/**
+ * Function to mark a method as a scope (alternative to decorator)
+ */
+export function markAsScope(target: any, propertyKey: string, descriptor?: PropertyDescriptor): void {
+    if (propertyKey.startsWith('scope') && propertyKey.length > 5) {
+        const scopeName = propertyKey.charAt(5).toLowerCase() + propertyKey.slice(6);
+        const ctor = target.constructor as Function & { __scopes?: Record<string, Function> };
+        ctor.__scopes = ctor.__scopes || {};
+        ctor.__scopes[scopeName] = (descriptor?.value ?? target[propertyKey]) as Function;
+    }
+}
+
+/**
+ * Function to mark a method as a macro (alternative to decorator)
+ */
+export function markAsMacro(target: any, propertyKey: string, descriptor?: PropertyDescriptor): void {
+    const ctor = target.constructor as Function & { __macros?: Record<string, Function> };
+    ctor.__macros = ctor.__macros || {};
+    ctor.__macros[propertyKey] = (descriptor?.value ?? target[propertyKey]) as Function;
 }
 
 /**
