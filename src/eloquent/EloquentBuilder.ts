@@ -34,9 +34,9 @@ export class EloquentBuilder<T extends Model> {
   // Used to qualify bare column names when generating SQL (helps avoid ambiguity)
   private columnQualifier?: string;
 
-    // Add scope-related properties
-    private appliedScopes: Set<string> = new Set();
-    private removedScopes: Set<string> = new Set();
+  // Add scope-related properties
+  private appliedScopes: Set<string> = new Set();
+  private removedScopes: Set<string> = new Set();
 
   constructor(model: typeof Model) {
     this.model = model;
@@ -53,68 +53,68 @@ export class EloquentBuilder<T extends Model> {
     return this;
   }
 
-    /**
-     * Apply a named scope
-     */
-    public namedScope(name: string, ...args: any[]): this {
-        const modelClass = this.model as typeof Model;
+  /**
+   * Apply a named scope
+   */
+  public namedScope(name: string, ...args: any[]): this {
+    const modelClass = this.model as typeof Model;
 
-        // Check if scope exists in local scopes
-        if (modelClass.localScopes && modelClass.localScopes[name]) {
-            modelClass.localScopes[name](this, ...args);
-            this.appliedScopes.add(name);
-        } else {
-            // Try scope method naming convention
-            const scopeMethodName = `scope${name.charAt(0).toUpperCase() + name.slice(1)}`;
-            if ((modelClass as any)[scopeMethodName]) {
-                (modelClass as any)[scopeMethodName](this, ...args);
-                this.appliedScopes.add(name);
-            }
-        }
-
-        return this;
+    // Check if scope exists in local scopes
+    if (modelClass.localScopes && modelClass.localScopes[name]) {
+      modelClass.localScopes[name](this, ...args);
+      this.appliedScopes.add(name);
+    } else {
+      // Try scope method naming convention
+      const scopeMethodName = `scope${name.charAt(0).toUpperCase() + name.slice(1)}`;
+      if ((modelClass as any)[scopeMethodName]) {
+        (modelClass as any)[scopeMethodName](this, ...args);
+        this.appliedScopes.add(name);
+      }
     }
 
-    /**
-     * Alias for namedScope
-     */
-    public scope(name: string, ...args: any[]): this {
-        return this.namedScope(name, ...args);
-    }
+    return this;
+  }
 
-    /**
-     * Apply multiple scopes
-     */
-    public scopes(scopes: { [name: string]: any[] }): this {
-        Object.entries(scopes).forEach(([name, args]) => {
-            this.namedScope(name, ...args);
-        });
-        return this;
-    }
+  /**
+   * Alias for namedScope
+   */
+  public scope(name: string, ...args: any[]): this {
+    return this.namedScope(name, ...args);
+  }
 
-    /**
-     * Get applied scopes
-     */
-    public getAppliedScopes(): string[] {
-        return Array.from(this.appliedScopes);
-    }
+  /**
+   * Apply multiple scopes
+   */
+  public scopes(scopes: { [name: string]: any[] }): this {
+    Object.entries(scopes).forEach(([name, args]) => {
+      this.namedScope(name, ...args);
+    });
+    return this;
+  }
 
-    /**
-     * Check if a scope has been applied
-     */
-    public hasScope(name: string): boolean {
-        return this.appliedScopes.has(name);
-    }
+  /**
+   * Get applied scopes
+   */
+  public getAppliedScopes(): string[] {
+    return Array.from(this.appliedScopes);
+  }
 
-    /**
-     * Remove a scope
-     */
-    public withoutScope(name: string): this {
-        this.removedScopes.add(name);
-        // Note: Actually removing already applied conditions is complex
-        // This just prevents re-application
-        return this;
-    }
+  /**
+   * Check if a scope has been applied
+   */
+  public hasScope(name: string): boolean {
+    return this.appliedScopes.has(name);
+  }
+
+  /**
+   * Remove a scope
+   */
+  public withoutScope(name: string): this {
+    this.removedScopes.add(name);
+    // Note: Actually removing already applied conditions is complex
+    // This just prevents re-application
+    return this;
+  }
 
   // Alias for possible misspelling
   public withThrashed(): this {
@@ -135,7 +135,7 @@ export class EloquentBuilder<T extends Model> {
 
   public onlyTrashed(): this {
     // remove any previously added deleted_at conditions so we can set our own
-    this.whereClauses = this.whereClauses.filter(w => w.column !== 'deleted_at');
+    this.whereClauses = this.whereClauses.filter((w) => w.column !== 'deleted_at');
     this.includeTrashed = true; // prevent auto-injection of deleted_at = null
     this.onlyTrashedFlag = true;
     // add condition to select only soft deleted rows
@@ -187,7 +187,7 @@ export class EloquentBuilder<T extends Model> {
     if (typeof relations === 'string') {
       addRel(relations, {});
     } else if (Array.isArray(relations)) {
-      relations.forEach(r => addRel(r, {}));
+      relations.forEach((r) => addRel(r, {}));
     } else if (relations && typeof relations === 'object') {
       Object.entries(relations).forEach(([key, val]) => {
         const options: EagerLoadOptions = {};
@@ -233,7 +233,7 @@ export class EloquentBuilder<T extends Model> {
   where(
     column: string | ((builder: EloquentBuilder<T>) => void),
     operator?: any,
-    value?: any
+    value?: any,
   ): this {
     if (typeof column === 'function') {
       // Nested where
@@ -269,7 +269,7 @@ export class EloquentBuilder<T extends Model> {
   orWhere(
     column: string | ((builder: EloquentBuilder<T>) => void),
     operator?: any,
-    value?: any
+    value?: any,
   ): this {
     if (typeof column === 'function') {
       const nestedBuilder = new EloquentBuilder<T>(this.model as any);
@@ -345,7 +345,7 @@ export class EloquentBuilder<T extends Model> {
     relation: string,
     callback?: (query: EloquentBuilder<any>) => void,
     operator: string = '>=',
-    count: number = 1
+    count: number = 1,
   ): this {
     this.hasConditions.push({ relation, operator, count, callback });
     return this;
@@ -361,7 +361,7 @@ export class EloquentBuilder<T extends Model> {
     first: string,
     operator: string,
     second: string,
-    type: 'inner' | 'left' | 'right' | 'cross' = 'inner'
+    type: 'inner' | 'left' | 'right' | 'cross' = 'inner',
   ): this {
     this.joinClauses.push({ table, first, operator, second, type });
     return this;
@@ -417,7 +417,7 @@ export class EloquentBuilder<T extends Model> {
   async get(): Promise<T[]> {
     const data = await this.executeQuery();
 
-    const models = data.map(item => {
+    const models = data.map((item) => {
       const instance = new (this.model as any)();
       instance.hydrate(item);
       return instance as T;
@@ -437,7 +437,7 @@ export class EloquentBuilder<T extends Model> {
   async toArray(): Promise<any[]> {
     const models = await this.get();
     // Convert to JSON with proper nested relationship handling
-    return models.map(m => {
+    return models.map((m) => {
       if (typeof (m as any).toJSON === 'function') {
         // Pass the relation tree to toJSON for proper nested serialization
         return (m as any).toJSON({
@@ -545,10 +545,10 @@ export class EloquentBuilder<T extends Model> {
     const keys = Object.keys(values || {});
     if (!keys.length) return 0;
 
-    const setSql = keys.map(k => `${k} = ?`).join(', ');
+    const setSql = keys.map((k) => `${k} = ?`).join(', ');
     const where = this.buildWhereClause();
     const sql = `UPDATE ${tableName} SET ${setSql}${where.sql}`;
-    const params = [...keys.map(k => (values as any)[k]), ...where.params];
+    const params = [...keys.map((k) => (values as any)[k]), ...where.params];
 
     const result: any = await dbQuery<any>(sql, params);
     return result && result.affectedRows ? Number(result.affectedRows) : 0;
@@ -597,12 +597,12 @@ export class EloquentBuilder<T extends Model> {
     if (getDbType() === 'mongodb') return this.insertMongoMany(rows);
     if (!rows || !rows.length) return 0;
     const tableName = (this.model as typeof Model).getTable();
-    const cols = Array.from(new Set(rows.flatMap(r => Object.keys(r))));
+    const cols = Array.from(new Set(rows.flatMap((r) => Object.keys(r))));
     const placeholdersRow = `(${cols.map(() => '?').join(',')})`;
     const placeholders = new Array(rows.length).fill(placeholdersRow).join(',');
     const sql = `INSERT INTO ${tableName} (${cols.join(',')}) VALUES ${placeholders}`;
     const params: any[] = [];
-    rows.forEach(r => cols.forEach(c => params.push(r[c])));
+    rows.forEach((r) => cols.forEach((c) => params.push(r[c])));
     const result: any = await dbQuery<any>(sql, params);
     return result && result.affectedRows ? Number(result.affectedRows) : 0;
   }
@@ -627,7 +627,7 @@ export class EloquentBuilder<T extends Model> {
     const cols = Object.keys(row);
     const placeholders = `(${cols.map(() => '?').join(',')})`;
     const sql = `INSERT INTO ${tableName} (${cols.join(',')}) VALUES ${placeholders}`;
-    const params = cols.map(c => row[c]);
+    const params = cols.map((c) => row[c]);
     const result: any = await dbQuery<any>(sql, params);
     return result.insertId;
   }
@@ -643,7 +643,7 @@ export class EloquentBuilder<T extends Model> {
 
   withCount(relations: string | string[]): this {
     const rels = Array.isArray(relations) ? relations : [relations];
-    rels.forEach(relation => {
+    rels.forEach((relation) => {
       this.selectedColumns = this.selectedColumns || ['*'];
       this.selectedColumns.push(`${relation}_count`);
     });
@@ -672,7 +672,7 @@ export class EloquentBuilder<T extends Model> {
       (this.model as any).softDeletes &&
       !this.includeTrashed &&
       !this.onlyTrashedFlag &&
-      !this.whereClauses.some(w => w.column === 'deleted_at')
+      !this.whereClauses.some((w) => w.column === 'deleted_at')
     ) {
       this.whereClauses.push({ column: 'deleted_at', operator: '=', value: null, boolean: 'and' });
       this.appliedSoftDeleteFilter = true;
@@ -767,7 +767,10 @@ export class EloquentBuilder<T extends Model> {
     return this.whereClauses;
   }
 
-  private buildHasConditionsSQL(baseTable: string, forBuilder?: EloquentBuilder<any>): { sql: string; params: any[] } {
+  private buildHasConditionsSQL(
+    baseTable: string,
+    forBuilder?: EloquentBuilder<any>,
+  ): { sql: string; params: any[] } {
     const builder = forBuilder || this;
     if (!builder.hasConditions.length) return { sql: '', params: [] };
     const instance = new (builder.model as any)();
@@ -775,7 +778,7 @@ export class EloquentBuilder<T extends Model> {
     const params: any[] = [];
     const parentPK = (builder.model as any).primaryKey || 'id';
 
-    builder.hasConditions.forEach(cond => {
+    builder.hasConditions.forEach((cond) => {
       const relMeta = (instance as any).getRelationship(cond.relation);
       if (!relMeta) return; // skip silently
       const relatedModel = relMeta.model as typeof Model;
@@ -790,7 +793,12 @@ export class EloquentBuilder<T extends Model> {
       const softDeleteFragment = (relatedModel as any).softDeletes ? ' AND deleted_at IS NULL' : '';
 
       let subquery = '';
-      if (relMeta.type === 'hasOne' || relMeta.type === 'hasMany' || relMeta.type === 'morphOne' || relMeta.type === 'morphMany') {
+      if (
+        relMeta.type === 'hasOne' ||
+        relMeta.type === 'hasMany' ||
+        relMeta.type === 'morphOne' ||
+        relMeta.type === 'morphMany'
+      ) {
         const foreignKey = relMeta.foreignKey || `${baseTable}_id`;
         if (cond.callback) {
           const cb = new EloquentBuilder(relatedModel) as any;
@@ -858,7 +866,7 @@ export class EloquentBuilder<T extends Model> {
     });
 
     if (!clauses.length) return { sql: '', params: [] };
-    return { sql: clauses.map(c => `AND ${c}`).join(' '), params };
+    return { sql: clauses.map((c) => `AND ${c}`).join(' '), params };
   }
 
   private async applyHasConditionsMongo(docs: any[]): Promise<any[]> {
@@ -871,7 +879,10 @@ export class EloquentBuilder<T extends Model> {
       let allOk = true;
       for (const cond of this.hasConditions) {
         const relMeta = (instance as any).getRelationship(cond.relation);
-        if (!relMeta) { allOk = false; break; }
+        if (!relMeta) {
+          allOk = false;
+          break;
+        }
         const relatedModel = relMeta.model as typeof Model;
         const relatedTable = (relatedModel as any).getTable();
         const relatedPK = (relatedModel as any).primaryKey || 'id';
@@ -881,21 +892,34 @@ export class EloquentBuilder<T extends Model> {
         let actual = 0;
 
         // Helper: apply nested has on related docs collection
-        const applyNestedHasForRelatedDocs = async (docsArr: any[], cb?: EloquentBuilder<any>): Promise<number> => {
+        const applyNestedHasForRelatedDocs = async (
+          docsArr: any[],
+          cb?: EloquentBuilder<any>,
+        ): Promise<number> => {
           if (!cb || !cb.hasConditions || cb.hasConditions.length === 0) return docsArr.length;
           const filtered: any[] = [];
           for (const rd of docsArr) {
             let okAll = true;
             for (const nestedCond of cb.hasConditions) {
-              const relMeta2 = (new (relatedModel as any)() as any).getRelationship(nestedCond.relation);
-              if (!relMeta2) { okAll = false; break; }
+              const relMeta2 = (new (relatedModel as any)() as any).getRelationship(
+                nestedCond.relation,
+              );
+              if (!relMeta2) {
+                okAll = false;
+                break;
+              }
               const nestedModel = relMeta2.model as typeof Model;
               const nestedTable = (nestedModel as any).getTable();
               const nestedPK = (nestedModel as any).primaryKey || 'id';
               const op = nestedCond.operator || '>=';
               const exp = nestedCond.count ?? 1;
               let innerActual = 0;
-              if (relMeta2.type === 'hasOne' || relMeta2.type === 'hasMany' || relMeta2.type === 'morphOne' || relMeta2.type === 'morphMany') {
+              if (
+                relMeta2.type === 'hasOne' ||
+                relMeta2.type === 'hasMany' ||
+                relMeta2.type === 'morphOne' ||
+                relMeta2.type === 'morphMany'
+              ) {
                 const fk = relMeta2.foreignKey || `${relatedTable}_id`;
                 const c2 = mongoCollection(nestedTable);
                 const nestedBuilder = nestedCond.callback ? new EloquentBuilder(nestedModel) : null;
@@ -904,7 +928,9 @@ export class EloquentBuilder<T extends Model> {
                 if ((nestedModel as any).softDeletes) baseFilter2.deleted_at = null;
                 if (nestedBuilder) {
                   const extra2 = (nestedBuilder as any).buildMongoFilter();
-                  const filters2 = Object.keys(extra2).length ? { $and: [baseFilter2, extra2] } : baseFilter2;
+                  const filters2 = Object.keys(extra2).length
+                    ? { $and: [baseFilter2, extra2] }
+                    : baseFilter2;
                   innerActual = await c2.countDocuments(filters2 as any);
                 } else {
                   innerActual = await c2.countDocuments(baseFilter2 as any);
@@ -913,7 +939,8 @@ export class EloquentBuilder<T extends Model> {
                 const fk2 = relMeta2.foreignKey || `${nestedCond.relation}_id`;
                 const ownerKey2 = relMeta2.ownerKey || nestedPK;
                 const fkVal2 = rd[fk2];
-                if (fkVal2 === undefined || fkVal2 === null) innerActual = 0; else {
+                if (fkVal2 === undefined || fkVal2 === null) innerActual = 0;
+                else {
                   const c2 = mongoCollection(nestedTable);
                   const baseFilter2: any = { [ownerKey2]: fkVal2 };
                   if ((nestedModel as any).softDeletes) baseFilter2.deleted_at = null;
@@ -921,19 +948,24 @@ export class EloquentBuilder<T extends Model> {
                     const nestedBuilder = new EloquentBuilder(nestedModel);
                     nestedCond.callback(nestedBuilder as any);
                     const extra2 = (nestedBuilder as any).buildMongoFilter();
-                    const filters2 = Object.keys(extra2).length ? { $and: [baseFilter2, extra2] } : baseFilter2;
+                    const filters2 = Object.keys(extra2).length
+                      ? { $and: [baseFilter2, extra2] }
+                      : baseFilter2;
                     innerActual = await c2.countDocuments(filters2 as any);
                   } else innerActual = await c2.countDocuments(baseFilter2 as any);
                 }
               } else if (relMeta2.type === 'belongsToMany') {
                 const pivot2 = relMeta2.table;
-                const foreignPivotKey2 = relMeta2.foreignKey || `${(relatedModel as any).getTable()}_id`;
+                const foreignPivotKey2 =
+                  relMeta2.foreignKey || `${(relatedModel as any).getTable()}_id`;
                 const relatedPivotKey2 = relMeta2.relatedKey || `${nestedTable}_id`;
                 const pc2 = mongoCollection(pivot2);
                 const pivots2 = await pc2.find({ [foreignPivotKey2]: rd[relatedPK] }).toArray();
-                if (!pivots2.length) innerActual = 0; else {
-                  const relatedIds2 = Array.from(new Set(pivots2.map(p => p[relatedPivotKey2])));
-                  if (!relatedIds2.length) innerActual = 0; else {
+                if (!pivots2.length) innerActual = 0;
+                else {
+                  const relatedIds2 = Array.from(new Set(pivots2.map((p) => p[relatedPivotKey2])));
+                  if (!relatedIds2.length) innerActual = 0;
+                  else {
                     const rc2 = mongoCollection(nestedTable);
                     let filter2: any = { [nestedPK]: { $in: relatedIds2 } };
                     if ((nestedModel as any).softDeletes) filter2.deleted_at = null;
@@ -946,26 +978,53 @@ export class EloquentBuilder<T extends Model> {
                     innerActual = await rc2.countDocuments(filter2 as any);
                   }
                 }
-              } else { okAll = false; break; }
+              } else {
+                okAll = false;
+                break;
+              }
 
               let okInner = false;
               switch (op) {
-                case '>': okInner = innerActual > exp; break;
-                case '>=': okInner = innerActual >= exp; break;
-                case '<': okInner = innerActual < exp; break;
-                case '<=': okInner = innerActual <= exp; break;
-                case '=': case '==': okInner = innerActual === exp; break;
-                case '!=': case '<>': okInner = innerActual !== exp; break;
-                default: okInner = innerActual >= exp; break;
+                case '>':
+                  okInner = innerActual > exp;
+                  break;
+                case '>=':
+                  okInner = innerActual >= exp;
+                  break;
+                case '<':
+                  okInner = innerActual < exp;
+                  break;
+                case '<=':
+                  okInner = innerActual <= exp;
+                  break;
+                case '=':
+                case '==':
+                  okInner = innerActual === exp;
+                  break;
+                case '!=':
+                case '<>':
+                  okInner = innerActual !== exp;
+                  break;
+                default:
+                  okInner = innerActual >= exp;
+                  break;
               }
-              if (!okInner) { okAll = false; break; }
+              if (!okInner) {
+                okAll = false;
+                break;
+              }
             }
             if (okAll) filtered.push(rd);
           }
           return filtered.length;
         };
 
-        if (relMeta.type === 'hasOne' || relMeta.type === 'hasMany' || relMeta.type === 'morphOne' || relMeta.type === 'morphMany') {
+        if (
+          relMeta.type === 'hasOne' ||
+          relMeta.type === 'hasMany' ||
+          relMeta.type === 'morphOne' ||
+          relMeta.type === 'morphMany'
+        ) {
           const foreignKey = relMeta.foreignKey || `${(this.model as any).getTable()}_id`;
           const c = mongoCollection(relatedTable);
           const constraintBuilder = cond.callback ? new EloquentBuilder(relatedModel) : null;
@@ -988,7 +1047,8 @@ export class EloquentBuilder<T extends Model> {
           const foreignKey = relMeta.foreignKey || `${cond.relation}_id`;
           const ownerKey = relMeta.ownerKey || relatedPK;
           const fkVal = doc[foreignKey];
-          if (fkVal === undefined || fkVal === null) actual = 0; else {
+          if (fkVal === undefined || fkVal === null) actual = 0;
+          else {
             const c = mongoCollection(relatedTable);
             const baseFilter: any = { [ownerKey]: fkVal };
             if ((relatedModel as any).softDeletes) baseFilter.deleted_at = null;
@@ -996,7 +1056,9 @@ export class EloquentBuilder<T extends Model> {
               const constraintBuilder = new EloquentBuilder(relatedModel);
               cond.callback(constraintBuilder as any);
               const extra = (constraintBuilder as any).buildMongoFilter();
-              const filters = Object.keys(extra).length ? { $and: [baseFilter, extra] } : baseFilter;
+              const filters = Object.keys(extra).length
+                ? { $and: [baseFilter, extra] }
+                : baseFilter;
               if (constraintBuilder.hasConditions && constraintBuilder.hasConditions.length) {
                 const arr = await c.find(filters as any).toArray();
                 actual = await applyNestedHasForRelatedDocs(arr, constraintBuilder as any);
@@ -1011,9 +1073,11 @@ export class EloquentBuilder<T extends Model> {
           const relatedPivotKey = relMeta.relatedKey || `${relatedTable}_id`;
           const pc = mongoCollection(pivot);
           const pivots = await pc.find({ [foreignPivotKey]: doc[parentPK] }).toArray();
-          if (!pivots.length) actual = 0; else {
-            const relatedIds = Array.from(new Set(pivots.map(p => p[relatedPivotKey])));
-            if (!relatedIds.length) actual = 0; else {
+          if (!pivots.length) actual = 0;
+          else {
+            const relatedIds = Array.from(new Set(pivots.map((p) => p[relatedPivotKey])));
+            if (!relatedIds.length) actual = 0;
+            else {
               const rc = mongoCollection(relatedTable);
               let filter: any = { [relatedPK]: { $in: relatedIds } };
               if ((relatedModel as any).softDeletes) filter.deleted_at = null;
@@ -1037,15 +1101,34 @@ export class EloquentBuilder<T extends Model> {
 
         let ok = false;
         switch (operator) {
-          case '>': ok = actual > expected; break;
-          case '>=': ok = actual >= expected; break;
-          case '<': ok = actual < expected; break;
-          case '<=': ok = actual <= expected; break;
-          case '=': case '==': ok = actual === expected; break;
-          case '!=': case '<>': ok = actual !== expected; break;
-          default: ok = actual >= expected; break;
+          case '>':
+            ok = actual > expected;
+            break;
+          case '>=':
+            ok = actual >= expected;
+            break;
+          case '<':
+            ok = actual < expected;
+            break;
+          case '<=':
+            ok = actual <= expected;
+            break;
+          case '=':
+          case '==':
+            ok = actual === expected;
+            break;
+          case '!=':
+          case '<>':
+            ok = actual !== expected;
+            break;
+          default:
+            ok = actual >= expected;
+            break;
         }
-        if (!ok) { allOk = false; break; }
+        if (!ok) {
+          allOk = false;
+          break;
+        }
       }
       if (allOk) kept.push(doc);
     }
@@ -1064,9 +1147,9 @@ export class EloquentBuilder<T extends Model> {
     const params: any[] = [];
 
     // Add joins
-    this.joinClauses.forEach(join => {
+    this.joinClauses.forEach((join) => {
       parts.push(
-        `${join.type.toUpperCase()} JOIN ${join.table} ON ${join.first} ${join.operator} ${join.second}`
+        `${join.type.toUpperCase()} JOIN ${join.table} ON ${join.first} ${join.operator} ${join.second}`,
       );
     });
 
@@ -1080,8 +1163,8 @@ export class EloquentBuilder<T extends Model> {
       params.push(...where.params);
     }
 
-      // Note: Scopes are applied through where clauses already added
-      // so no changes needed here
+    // Note: Scopes are applied through where clauses already added
+    // so no changes needed here
 
     // Add has conditions (translated to subqueries)
     const hasSql = this.buildHasConditionsSQL(tableName);
@@ -1101,9 +1184,9 @@ export class EloquentBuilder<T extends Model> {
 
     // Add having
     if (this.havingClauses.length > 0) {
-      const havingParts = this.havingClauses.map(h => `${h.column} ${h.operator} ?`);
+      const havingParts = this.havingClauses.map((h) => `${h.column} ${h.operator} ?`);
       parts.push(`HAVING ${havingParts.join(' AND ')}`);
-      params.push(...this.havingClauses.map(h => h.value));
+      params.push(...this.havingClauses.map((h) => h.value));
     }
 
     // Add order by
@@ -1155,7 +1238,7 @@ export class EloquentBuilder<T extends Model> {
   private async loadRelationTree(
     currentModels: any[],
     tree: Record<string, any>,
-    parentPath: string
+    parentPath: string,
   ): Promise<void> {
     if (!currentModels.length) return;
     for (const relName of Object.keys(tree)) {
@@ -1172,7 +1255,7 @@ export class EloquentBuilder<T extends Model> {
         // Need to load relation on nested model instances
         // Build a temporary builder for nested model type
         const sampleModel = currentModels.find(
-          m => typeof m?.getRelationship === 'function' && m.getRelationship(relName)
+          (m) => typeof m?.getRelationship === 'function' && m.getRelationship(relName),
         );
         if (!sampleModel) continue;
         const tmpBuilder = new EloquentBuilder(sampleModel.constructor as typeof Model);
@@ -1180,7 +1263,7 @@ export class EloquentBuilder<T extends Model> {
       }
       // Gather child instances to recurse
       const childContainer: any[] = [];
-      currentModels.forEach(m => {
+      currentModels.forEach((m) => {
         const loaded = (m as any).relationshipsLoaded?.[relName];
         if (!loaded) return;
         if (Array.isArray(loaded)) childContainer.push(...loaded);
@@ -1203,14 +1286,14 @@ export class EloquentBuilder<T extends Model> {
   public async loadRelationship(
     models: T[],
     relation: string,
-    options: EagerLoadOptions = {}
+    options: EagerLoadOptions = {},
   ): Promise<void> {
     if (!models.length) return;
     const sampleModel = models[0];
     const rel = (sampleModel as any).getRelationship(relation);
     if (!rel) {
       console.warn(
-        `Relationship "${relation}" not found for model ${(sampleModel as any).constructor?.name || 'Unknown'}`
+        `Relationship "${relation}" not found for model ${(sampleModel as any).constructor?.name || 'Unknown'}`,
       );
       return;
     }
@@ -1227,7 +1310,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
       else
         await this.loadHasOne(
@@ -1237,7 +1320,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
     } else if (rel.type === 'hasMany') {
       if (getDbType() === 'mongodb')
@@ -1248,7 +1331,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
       else
         await this.loadHasMany(
@@ -1258,7 +1341,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
     } else if (rel.type === 'belongsTo') {
       if (getDbType() === 'mongodb')
@@ -1269,7 +1352,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
       else
         await this.loadBelongsTo(
@@ -1279,7 +1362,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
     } else if (rel.type === 'belongsToMany') {
       if (getDbType() === 'mongodb')
@@ -1290,7 +1373,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
       else
         await this.loadBelongsToMany(
@@ -1300,7 +1383,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
     } else if (rel.type === 'morphOne' || rel.type === 'morphMany') {
       if (getDbType() === 'mongodb')
@@ -1311,7 +1394,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
       else
         await this.loadMorphRelations(
@@ -1321,7 +1404,7 @@ export class EloquentBuilder<T extends Model> {
           relatedModel,
           relatedTable,
           relatedPK,
-          options
+          options,
         );
     }
   }
@@ -1333,14 +1416,14 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
     const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
     const localIds = Array.from(
       new Set(
-        models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined)
-      )
+        models.map((m) => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined),
+      ),
     );
 
     if (!localIds.length) return;
@@ -1366,9 +1449,9 @@ export class EloquentBuilder<T extends Model> {
 
     const rows = await dbQuery<any>(sql, params);
     const byFK = new Map<any, any>();
-    rows.forEach(r => byFK.set(r[foreignKey], r));
+    rows.forEach((r) => byFK.set(r[foreignKey], r));
 
-    models.forEach(m => {
+    models.forEach((m) => {
       const key = (m as any).getAttribute(localKey);
       const row = byFK.get(key) || null;
       if (row) {
@@ -1388,18 +1471,18 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
     const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
     const localIds = Array.from(
       new Set(
-        models.map(m => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined)
-      )
+        models.map((m) => (m as any).getAttribute(localKey)).filter((v: any) => v !== undefined),
+      ),
     );
 
     if (!localIds.length) {
-      models.forEach(m => this.setRelation(m, relation, []));
+      models.forEach((m) => this.setRelation(m, relation, []));
       return;
     }
 
@@ -1423,13 +1506,13 @@ export class EloquentBuilder<T extends Model> {
 
     const rows = await dbQuery<any>(sql, params);
     const grouped = new Map<any, any>();
-    rows.forEach(r => {
+    rows.forEach((r) => {
       const k = r[foreignKey];
       if (!grouped.has(k)) grouped.set(k, []);
       grouped.get(k)!.push(r);
     });
 
-    models.forEach(m => {
+    models.forEach((m) => {
       const key = (m as any).getAttribute(localKey);
       const list = (grouped.get(key) || []).map((row: any) => {
         const inst = new (relatedModel as any)();
@@ -1447,20 +1530,20 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     const foreignKey = rel.foreignKey || `${relation}_id`;
     const ownerKey = rel.ownerKey || relatedPK || 'id';
     const foreignIds = Array.from(
       new Set(
         models
-          .map(m => (m as any).getAttribute(foreignKey))
-          .filter((v: any) => v !== undefined && v !== null)
-      )
+          .map((m) => (m as any).getAttribute(foreignKey))
+          .filter((v: any) => v !== undefined && v !== null),
+      ),
     );
 
     if (!foreignIds.length) {
-      models.forEach(m => this.setRelation(m, relation, null));
+      models.forEach((m) => this.setRelation(m, relation, null));
       return;
     }
 
@@ -1484,9 +1567,9 @@ export class EloquentBuilder<T extends Model> {
 
     const rows = await dbQuery<any>(sql, params);
     const byOwner = new Map<any, any>();
-    rows.forEach(r => byOwner.set(r[ownerKey], r));
+    rows.forEach((r) => byOwner.set(r[ownerKey], r));
 
-    models.forEach(m => {
+    models.forEach((m) => {
       const fk = (m as any).getAttribute(foreignKey);
       const row = byOwner.get(fk) || null;
       if (row) {
@@ -1506,7 +1589,7 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     // SQL implementation (no Mongo calls). Mongo handled separately in loadBelongsToManyMongo.
     const pivotTable = rel.table;
@@ -1516,12 +1599,12 @@ export class EloquentBuilder<T extends Model> {
     const parentIds = Array.from(
       new Set(
         models
-          .map(m => (m as any).getAttribute(parentPK))
-          .filter((v: any) => v !== undefined && v !== null)
-      )
+          .map((m) => (m as any).getAttribute(parentPK))
+          .filter((v: any) => v !== undefined && v !== null),
+      ),
     );
     if (!parentIds.length) {
-      models.forEach(m => this.setRelation(m, relation, []));
+      models.forEach((m) => this.setRelation(m, relation, []));
       return;
     }
 
@@ -1532,7 +1615,7 @@ export class EloquentBuilder<T extends Model> {
     // Apply constraints to related rows after pivot fetch (not to pivot query itself)
     const pivotRows = await dbQuery<any>(pivotSql, pivotParams);
     if (!pivotRows.length) {
-      models.forEach(m => this.setRelation(m, relation, []));
+      models.forEach((m) => this.setRelation(m, relation, []));
       return;
     }
 
@@ -1558,10 +1641,10 @@ export class EloquentBuilder<T extends Model> {
 
     const relatedRows = await dbQuery<any>(relatedSql, relatedParams);
     const relatedMap = new Map<any, any>();
-    relatedRows.forEach(r => relatedMap.set(r[relatedPK], r));
+    relatedRows.forEach((r) => relatedMap.set(r[relatedPK], r));
 
     const grouped = new Map<any, any[]>();
-    pivotRows.forEach(p => {
+    pivotRows.forEach((p) => {
       const relRow = relatedMap.get(p.related_id);
       if (!grouped.has(p.parent_id)) grouped.set(p.parent_id, []);
       if (relRow) {
@@ -1571,7 +1654,7 @@ export class EloquentBuilder<T extends Model> {
       }
     });
 
-    models.forEach(m => {
+    models.forEach((m) => {
       const pid = (m as any).getAttribute(parentPK);
       const list = grouped.get(pid) || [];
       this.setRelation(m, relation, list);
@@ -1585,27 +1668,27 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     const pivotTable = rel.table;
     const parentPK = (this.model as any).primaryKey || 'id';
     const foreignPivotKey = rel.foreignKey || `${(this.model as any).getTable()}_id`;
     const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
     const parentRaw = models
-      .map(m => (m as any).getAttribute(parentPK))
+      .map((m) => (m as any).getAttribute(parentPK))
       .filter((v: any) => v !== undefined && v !== null);
     if (!parentRaw.length) {
-      models.forEach(m => this.setRelation(m, relation, []));
+      models.forEach((m) => this.setRelation(m, relation, []));
       return;
     }
     const parentMatch =
       parentPK === 'id'
-        ? Array.from(new Set(parentRaw.flatMap(v => this.expandIdForms(v))))
+        ? Array.from(new Set(parentRaw.flatMap((v) => this.expandIdForms(v))))
         : Array.from(new Set(parentRaw));
     const pc = mongoCollection(pivotTable);
     const pivots = await pc.find({ [foreignPivotKey]: { $in: parentMatch } }).toArray();
     if (!pivots.length) {
-      models.forEach(m => this.setRelation(m, relation, []));
+      models.forEach((m) => this.setRelation(m, relation, []));
       return;
     }
     // Gather related ids, allow string/number forms
@@ -1615,7 +1698,7 @@ export class EloquentBuilder<T extends Model> {
     if (relatedPK === 'id') {
       const oidList: ObjectId[] = [];
       const shortTokens: string[] = [];
-      relatedTokens.forEach(s => {
+      relatedTokens.forEach((s) => {
         if (/^[0-9a-fA-F]{24}$/.test(s)) {
           try {
             oidList.push(new ObjectId(s));
@@ -1629,7 +1712,7 @@ export class EloquentBuilder<T extends Model> {
       if (oidList.length) or.push({ _id: { $in: oidList } });
       if (shortTokens.length) {
         const tokenSet = Array.from(new Set(shortTokens));
-        const prefixExprs = tokenSet.map(t => ({
+        const prefixExprs = tokenSet.map((t) => ({
           $expr: { $eq: [{ $substrBytes: [{ $toString: '$_id' }, 0, t.length] }, t] },
         }));
         or.push(...prefixExprs);
@@ -1639,7 +1722,7 @@ export class EloquentBuilder<T extends Model> {
       rows = await rc.find({ [relatedPK]: { $in: relatedTokens } as any }).toArray();
     }
     const rmap = new Map<any, any>();
-    rows.forEach(r => {
+    rows.forEach((r) => {
       if (r && r._id && !('id' in r)) r.id = String(r._id);
       const idStr = String(r._id);
       const token = idStr.slice(0, 8);
@@ -1660,12 +1743,12 @@ export class EloquentBuilder<T extends Model> {
         grouped.get(pidStr)!.push(relRow);
       }
     });
-    models.forEach(m => {
+    models.forEach((m) => {
       const pid = (m as any).getAttribute(parentPK);
       const forms = parentPK === 'id' ? this.expandIdForms(pid) : [pid];
       const seen = new Set<string>();
       const collected: any[] = [];
-      forms.forEach(f => {
+      forms.forEach((f) => {
         const fStr = String(f);
         const arr = grouped.get(f) || grouped.get(fStr) || [];
         for (const r of arr) {
@@ -1676,7 +1759,7 @@ export class EloquentBuilder<T extends Model> {
           }
         }
       });
-      const list = collected.map(row => {
+      const list = collected.map((row) => {
         const inst = new (relatedModel as any)();
         inst.hydrate(row);
         return inst;
@@ -1692,7 +1775,7 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     // Implementation for morph relationships
     // This is a simplified version - you can expand this based on your needs
@@ -1701,11 +1784,11 @@ export class EloquentBuilder<T extends Model> {
     const morphTypeKey = rel.morphType || `${morphType}_type`;
 
     const localIds = Array.from(
-      new Set(models.map(m => (m as any).getAttribute('id')).filter((v: any) => v !== undefined))
+      new Set(models.map((m) => (m as any).getAttribute('id')).filter((v: any) => v !== undefined)),
     );
 
     if (!localIds.length) {
-      models.forEach(m => this.setRelation(m, relation, rel.type === 'morphOne' ? null : []));
+      models.forEach((m) => this.setRelation(m, relation, rel.type === 'morphOne' ? null : []));
       return;
     }
 
@@ -1730,9 +1813,9 @@ export class EloquentBuilder<T extends Model> {
 
     if (rel.type === 'morphOne') {
       const byFK = new Map<any, any>();
-      rows.forEach(r => byFK.set(r[foreignKey], r));
+      rows.forEach((r) => byFK.set(r[foreignKey], r));
 
-      models.forEach(m => {
+      models.forEach((m) => {
         const key = (m as any).getAttribute('id');
         const row = byFK.get(key) || null;
         if (row) {
@@ -1746,7 +1829,7 @@ export class EloquentBuilder<T extends Model> {
     } else {
       // morphMany
       const grouped = new Map<any, any[]>();
-      rows.forEach(r => {
+      rows.forEach((r) => {
         const k = r[foreignKey];
         if (r && r._id && !('id' in r)) r.id = String(r._id);
         if (!grouped.has(k)) grouped.set(k, []);
@@ -1755,18 +1838,18 @@ export class EloquentBuilder<T extends Model> {
         if (!grouped.has(ks)) grouped.set(ks, []);
         grouped.get(ks)!.push(r);
       });
-      models.forEach(m => {
+      models.forEach((m) => {
         const key = (m as any).getAttribute('id');
-        const keys = this.expandIdForms(key).map(v => String(v));
+        const keys = this.expandIdForms(key).map((v) => String(v));
         const acc: any[] = [];
-        keys.forEach(k => {
+        keys.forEach((k) => {
           const arr = grouped.get(k) || [];
           if (arr.length) acc.push(...arr);
         });
         const uniq = Array.from(
-          new Set(acc.map(x => (x._id ? String(x._id) : JSON.stringify(x))))
-        ).map(id => acc.find(x => (x._id ? String(x._id) : JSON.stringify(x)) === id));
-        const list = uniq.map(row => {
+          new Set(acc.map((x) => (x._id ? String(x._id) : JSON.stringify(x)))),
+        ).map((id) => acc.find((x) => (x._id ? String(x._id) : JSON.stringify(x)) === id));
+        const list = uniq.map((row) => {
           const inst = new (relatedModel as any)();
           inst.hydrate(row!);
           return inst;
@@ -1851,7 +1934,7 @@ export class EloquentBuilder<T extends Model> {
       (this.model as any).softDeletes &&
       !this.includeTrashed &&
       !this.onlyTrashedFlag &&
-      !this.whereClauses.some(w => w.column === 'deleted_at')
+      !this.whereClauses.some((w) => w.column === 'deleted_at')
     ) {
       this.whereClauses.push({ column: 'deleted_at', operator: '=', value: null, boolean: 'and' });
       this.appliedSoftDeleteFilter = true;
@@ -1870,12 +1953,12 @@ export class EloquentBuilder<T extends Model> {
         return nestedBuilder.buildMongoFilter();
       }
       if (Array.isArray(w.value) && (op === 'in' || op === 'not in')) {
-        const arr = w.value.map(v =>
+        const arr = w.value.map((v) =>
           this.isIdLikeField(w.column)
             ? this.coerceForField(w.column, v)
             : col === '_id'
               ? this.coerceId(v)
-              : v
+              : v,
         );
         return { [col]: op === 'in' ? { $in: arr } : { $nin: arr } };
       }
@@ -1934,7 +2017,7 @@ export class EloquentBuilder<T extends Model> {
     const filter = this.buildMongoFilter();
     const proj =
       this.selectedColumns && this.selectedColumns.length && this.selectedColumns[0] !== '*'
-        ? Object.fromEntries(this.selectedColumns.map(k => [this.normalizeField(k), 1]))
+        ? Object.fromEntries(this.selectedColumns.map((k) => [this.normalizeField(k), 1]))
         : undefined;
     let cursor = c.find(filter, proj ? { projection: proj } : undefined);
     if (this.orderByColumn) {
@@ -1945,7 +2028,7 @@ export class EloquentBuilder<T extends Model> {
     if (this.offsetValue !== undefined) cursor = cursor.skip(this.offsetValue);
     if (this.limitValue !== undefined) cursor = cursor.limit(this.limitValue);
     let docs = await cursor.toArray();
-    docs = docs.map(d => {
+    docs = docs.map((d) => {
       if (d && d._id && !('id' in d)) d.id = String(d._id);
       return d;
     });
@@ -1963,7 +2046,7 @@ export class EloquentBuilder<T extends Model> {
     let updateDoc: any;
     if (
       Object.values(values).some(
-        v => v && typeof v === 'object' && ('$inc' in (v as any) || '$dec' in (v as any))
+        (v) => v && typeof v === 'object' && ('$inc' in (v as any) || '$dec' in (v as any)),
       )
     ) {
       // support increment-like doc
@@ -1986,7 +2069,7 @@ export class EloquentBuilder<T extends Model> {
           Object.entries(values).map(([k, v]) => [
             this.normalizeField(k),
             this.coerceForField(k, v),
-          ])
+          ]),
         ),
       };
     }
@@ -2010,7 +2093,7 @@ export class EloquentBuilder<T extends Model> {
   private async insertMongoMany(rows: Array<Record<string, any>>): Promise<number> {
     const tableName = (this.model as typeof Model).getTable();
     const c = mongoCollection(tableName);
-    const docs = rows.map(r => {
+    const docs = rows.map((r) => {
       const d: any = { ...r };
       if ('id' in d && d.id && !d._id) {
         try {
@@ -2021,7 +2104,7 @@ export class EloquentBuilder<T extends Model> {
         delete d.id;
       }
       // normalize any *_id fields to ObjectId when possible
-      Object.keys(d).forEach(k => {
+      Object.keys(d).forEach((k) => {
         if (/_id$/i.test(k) && d[k] !== undefined && d[k] !== null) {
           const v = d[k];
           if (!(v instanceof ObjectId)) {
@@ -2051,7 +2134,7 @@ export class EloquentBuilder<T extends Model> {
     }
     // When whereHas/whereDoesntHave exist, fetch minimal docs and post-filter
     let docs = await c.find(filter, { projection: { _id: 1 } }).toArray();
-    docs = docs.map(d => {
+    docs = docs.map((d) => {
       if (d && d._id && !('id' in d)) d.id = String(d._id);
       return d;
     });
@@ -2087,34 +2170,34 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
     const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
     const localsRaw = models
-      .map(m => (m as any).getAttribute(localKey))
+      .map((m) => (m as any).getAttribute(localKey))
       .filter((v: any) => v !== undefined && v !== null);
     if (!localsRaw.length) return;
     let matchVals: any[] = Array.from(new Set(localsRaw));
     // If comparing id to non-_id foreign key, expand forms to handle first8/number cases
     if (localKey === 'id') {
-      matchVals = Array.from(new Set(localsRaw.flatMap(v => this.expandIdForms(v))));
+      matchVals = Array.from(new Set(localsRaw.flatMap((v) => this.expandIdForms(v))));
     }
     const c = mongoCollection(relatedTable);
     const rows = await c.find({ [foreignKey]: { $in: matchVals } }).toArray();
     const byFK = new Map<any, any>();
-    rows.forEach(r => {
+    rows.forEach((r) => {
       if (r && r._id && !('id' in r)) r.id = String(r._id);
       byFK.set(r[foreignKey], r);
     });
     // Also map stringified values for robustness
-    rows.forEach(r => {
+    rows.forEach((r) => {
       byFK.set(String(r[foreignKey]), r);
     });
-    models.forEach(m => {
+    models.forEach((m) => {
       const key = (m as any).getAttribute(localKey);
       const candidates = this.expandIdForms(key)
-        .map(v => byFK.get(v) || byFK.get(String(v)))
+        .map((v) => byFK.get(v) || byFK.get(String(v)))
         .filter(Boolean);
       const row = candidates[0] || null;
       if (row) {
@@ -2132,24 +2215,24 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     const localKey = rel.localKey || (this.model as any).primaryKey || 'id';
     const foreignKey = rel.foreignKey || `${(this.model as typeof Model).getTable()}_id`;
     const localsRaw = models
-      .map(m => (m as any).getAttribute(localKey))
+      .map((m) => (m as any).getAttribute(localKey))
       .filter((v: any) => v !== undefined && v !== null);
     if (!localsRaw.length) {
-      models.forEach(m => this.setRelation(m, relation, []));
+      models.forEach((m) => this.setRelation(m, relation, []));
       return;
     }
     let matchVals: any[] = Array.from(new Set(localsRaw));
     if (localKey === 'id')
-      matchVals = Array.from(new Set(localsRaw.flatMap(v => this.expandIdForms(v))));
+      matchVals = Array.from(new Set(localsRaw.flatMap((v) => this.expandIdForms(v))));
     const c = mongoCollection(relatedTable);
     const rows = await c.find({ [foreignKey]: { $in: matchVals } }).toArray();
     const grouped = new Map<any, any>();
-    rows.forEach(r => {
+    rows.forEach((r) => {
       if (r && r._id && !('id' in r)) r.id = String(r._id);
       const k = r[foreignKey];
       if (!grouped.has(k)) grouped.set(k, []);
@@ -2159,18 +2242,18 @@ export class EloquentBuilder<T extends Model> {
       if (!grouped.has(ks)) grouped.set(ks, []);
       grouped.get(ks)!.push(r);
     });
-    models.forEach(m => {
+    models.forEach((m) => {
       const key = (m as any).getAttribute(localKey);
-      const keys = this.expandIdForms(key).map(v => String(v));
+      const keys = this.expandIdForms(key).map((v) => String(v));
       const acc: any[] = [];
-      keys.forEach(k => {
+      keys.forEach((k) => {
         const arr = grouped.get(k) || grouped.get(key) || [];
         if (arr.length) acc.push(...arr);
       });
       const uniq = Array.from(
-        new Set(acc.map(x => (x._id ? String(x._id) : JSON.stringify(x))))
-      ).map(id => acc.find(x => (x._id ? String(x._id) : JSON.stringify(x)) === id));
-      const list = uniq.map(row => {
+        new Set(acc.map((x) => (x._id ? String(x._id) : JSON.stringify(x)))),
+      ).map((id) => acc.find((x) => (x._id ? String(x._id) : JSON.stringify(x)) === id));
+      const list = uniq.map((row) => {
         const inst = new (relatedModel as any)();
         inst.hydrate(row!);
         return inst;
@@ -2186,15 +2269,15 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     const foreignKey = rel.foreignKey || `${relation}_id`;
     const ownerKey = rel.ownerKey || relatedPK || 'id';
     const foreignIdsRaw = models
-      .map(m => (m as any).getAttribute(foreignKey))
+      .map((m) => (m as any).getAttribute(foreignKey))
       .filter((v: any) => v !== undefined && v !== null);
     if (!foreignIdsRaw.length) {
-      models.forEach(m => this.setRelation(m, relation, null));
+      models.forEach((m) => this.setRelation(m, relation, null));
       return;
     }
     const c = mongoCollection(relatedTable);
@@ -2204,7 +2287,7 @@ export class EloquentBuilder<T extends Model> {
       const asStrings = foreignIdsRaw.map((v: any) => String(v));
       const oidList: ObjectId[] = [];
       const shortTokens: string[] = [];
-      asStrings.forEach(s => {
+      asStrings.forEach((s) => {
         if (/^[0-9a-fA-F]{24}$/.test(s)) {
           try {
             oidList.push(new ObjectId(s));
@@ -2219,7 +2302,7 @@ export class EloquentBuilder<T extends Model> {
       if (oidList.length) or.push({ _id: { $in: oidList } });
       if (shortTokens.length) {
         const tokenSet = Array.from(new Set(shortTokens));
-        const prefixExprs = tokenSet.map(t => ({
+        const prefixExprs = tokenSet.map((t) => ({
           $expr: { $eq: [{ $substrBytes: [{ $toString: '$_id' }, 0, t.length] }, t] },
         }));
         or.push(...prefixExprs);
@@ -2230,19 +2313,19 @@ export class EloquentBuilder<T extends Model> {
       rows = await c.find({ [ownerKey]: { $in: ids } as any }).toArray();
     }
     const map = new Map<any, any>();
-    rows.forEach(r => {
+    rows.forEach((r) => {
       if (r && r._id && !('id' in r)) r.id = String(r._id);
       map.set(String(r._id), r);
     });
     // also map by first8 token to support numeric/digit matching
-    rows.forEach(r => {
+    rows.forEach((r) => {
       const token = String(r._id).slice(0, 8);
       map.set(token, r);
     });
-    models.forEach(m => {
+    models.forEach((m) => {
       const fk = (m as any).getAttribute(foreignKey);
       const candidates = this.expandIdForms(fk)
-        .map(v => map.get(String(v)))
+        .map((v) => map.get(String(v)))
         .filter(Boolean);
       const row = candidates[0] || null;
       if (row) {
@@ -2260,27 +2343,27 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     const pivotTable = rel.table;
     const parentPK = (this.model as any).primaryKey || 'id';
     const foreignPivotKey = rel.foreignKey || `${(this.model as any).getTable()}_id`;
     const relatedPivotKey = rel.relatedKey || `${relatedTable}_id`;
     const parentRaw = models
-      .map(m => (m as any).getAttribute(parentPK))
+      .map((m) => (m as any).getAttribute(parentPK))
       .filter((v: any) => v !== undefined && v !== null);
     if (!parentRaw.length) {
-      models.forEach(m => this.setRelation(m, relation, []));
+      models.forEach((m) => this.setRelation(m, relation, []));
       return;
     }
     const parentMatch =
       parentPK === 'id'
-        ? Array.from(new Set(parentRaw.flatMap(v => this.expandIdForms(v))))
+        ? Array.from(new Set(parentRaw.flatMap((v) => this.expandIdForms(v))))
         : Array.from(new Set(parentRaw));
     const pc = mongoCollection(pivotTable);
     const pivots = await pc.find({ [foreignPivotKey]: { $in: parentMatch } }).toArray();
     if (!pivots.length) {
-      models.forEach(m => this.setRelation(m, relation, []));
+      models.forEach((m) => this.setRelation(m, relation, []));
       return;
     }
     // Gather related ids, allow string/number forms
@@ -2290,7 +2373,7 @@ export class EloquentBuilder<T extends Model> {
     if (relatedPK === 'id') {
       const oidList: ObjectId[] = [];
       const shortTokens: string[] = [];
-      relatedTokens.forEach(s => {
+      relatedTokens.forEach((s) => {
         if (/^[0-9a-fA-F]{24}$/.test(s)) {
           try {
             oidList.push(new ObjectId(s));
@@ -2304,7 +2387,7 @@ export class EloquentBuilder<T extends Model> {
       if (oidList.length) or.push({ _id: { $in: oidList } });
       if (shortTokens.length) {
         const tokenSet = Array.from(new Set(shortTokens));
-        const prefixExprs = tokenSet.map(t => ({
+        const prefixExprs = tokenSet.map((t) => ({
           $expr: { $eq: [{ $substrBytes: [{ $toString: '$_id' }, 0, t.length] }, t] },
         }));
         or.push(...prefixExprs);
@@ -2314,7 +2397,7 @@ export class EloquentBuilder<T extends Model> {
       rows = await rc.find({ [relatedPK]: { $in: relatedTokens } as any }).toArray();
     }
     const rmap = new Map<any, any>();
-    rows.forEach(r => {
+    rows.forEach((r) => {
       if (r && r._id && !('id' in r)) r.id = String(r._id);
       const idStr = String(r._id);
       const token = idStr.slice(0, 8);
@@ -2335,12 +2418,12 @@ export class EloquentBuilder<T extends Model> {
         grouped.get(pidStr)!.push(relRow);
       }
     });
-    models.forEach(m => {
+    models.forEach((m) => {
       const pid = (m as any).getAttribute(parentPK);
       const forms = parentPK === 'id' ? this.expandIdForms(pid) : [pid];
       const seen = new Set<string>();
       const collected: any[] = [];
-      forms.forEach(f => {
+      forms.forEach((f) => {
         const fStr = String(f);
         const arr = grouped.get(f) || grouped.get(fStr) || [];
         for (const r of arr) {
@@ -2351,7 +2434,7 @@ export class EloquentBuilder<T extends Model> {
           }
         }
       });
-      const list = collected.map(row => {
+      const list = collected.map((row) => {
         const inst = new (relatedModel as any)();
         inst.hydrate(row);
         return inst;
@@ -2367,34 +2450,34 @@ export class EloquentBuilder<T extends Model> {
     relatedModel: typeof Model,
     relatedTable: string,
     relatedPK: string,
-    options: EagerLoadOptions
+    options: EagerLoadOptions,
   ): Promise<void> {
     const morphType = rel.morphName || (this.model as typeof Model).getTable();
     const foreignKey = rel.foreignKey || `${morphType}_id`;
     const morphTypeKey = rel.morphType || `${morphType}_type`;
     const localsRaw = models
-      .map(m => (m as any).getAttribute('id'))
+      .map((m) => (m as any).getAttribute('id'))
       .filter((v: any) => v !== undefined);
     if (!localsRaw.length) {
-      models.forEach(m => this.setRelation(m, relation, rel.type === 'morphOne' ? null : []));
+      models.forEach((m) => this.setRelation(m, relation, rel.type === 'morphOne' ? null : []));
       return;
     }
-    const matchVals = Array.from(new Set(localsRaw.flatMap(v => this.expandIdForms(v))));
+    const matchVals = Array.from(new Set(localsRaw.flatMap((v) => this.expandIdForms(v))));
     const c = mongoCollection(relatedTable);
     const rows = await c
       .find({ [foreignKey]: { $in: matchVals }, [morphTypeKey]: morphType } as any)
       .toArray();
     if (rel.type === 'morphOne') {
       const byFK = new Map<any, any>();
-      rows.forEach(r => {
+      rows.forEach((r) => {
         if (r && r._id && !('id' in r)) r.id = String(r._id);
         byFK.set(r[foreignKey], r);
         byFK.set(String(r[foreignKey]), r);
       });
-      models.forEach(m => {
+      models.forEach((m) => {
         const key = (m as any).getAttribute('id');
         const cand = this.expandIdForms(key);
-        const row = cand.map(v => byFK.get(v) || byFK.get(String(v))).find(Boolean) || null;
+        const row = cand.map((v) => byFK.get(v) || byFK.get(String(v))).find(Boolean) || null;
         if (row) {
           const inst = new (relatedModel as any)();
           inst.hydrate(row);
@@ -2403,7 +2486,7 @@ export class EloquentBuilder<T extends Model> {
       });
     } else {
       const grouped = new Map<any, any>();
-      rows.forEach(r => {
+      rows.forEach((r) => {
         const k = r[foreignKey];
         if (r && r._id && !('id' in r)) r.id = String(r._id);
         if (!grouped.has(k)) grouped.set(k, []);
@@ -2412,18 +2495,18 @@ export class EloquentBuilder<T extends Model> {
         if (!grouped.has(ks)) grouped.set(ks, []);
         grouped.get(ks)!.push(r);
       });
-      models.forEach(m => {
+      models.forEach((m) => {
         const key = (m as any).getAttribute('id');
-        const keys = this.expandIdForms(key).map(v => String(v));
+        const keys = this.expandIdForms(key).map((v) => String(v));
         const acc: any[] = [];
-        keys.forEach(k => {
+        keys.forEach((k) => {
           const arr = grouped.get(k) || [];
           if (arr.length) acc.push(...arr);
         });
         const uniq = Array.from(
-          new Set(acc.map(x => (x._id ? String(x._id) : JSON.stringify(x))))
-        ).map(id => acc.find(x => (x._id ? String(x._id) : JSON.stringify(x)) === id));
-        const list = uniq.map(row => {
+          new Set(acc.map((x) => (x._id ? String(x._id) : JSON.stringify(x)))),
+        ).map((id) => acc.find((x) => (x._id ? String(x._id) : JSON.stringify(x)) === id));
+        const list = uniq.map((row) => {
           const inst = new (relatedModel as any)();
           inst.hydrate(row!);
           return inst;
