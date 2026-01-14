@@ -12,12 +12,13 @@ export default function errorHandler(err: any, req: Request, res: Response, _nex
       success: false,
       message: 'Validation failed',
       errors: err.errors,
-      messages: err.messages
+      messages: err.messages,
     });
   }
 
   // Extract status & message
-  const status = (typeof err.status === 'number' && err.status >= 400 && err.status < 600) ? err.status : 500;
+  const status =
+    typeof err.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
   const message = err.message || 'Internal Server Error';
 
   const payload: any = {
@@ -30,8 +31,8 @@ export default function errorHandler(err: any, req: Request, res: Response, _nex
   if (err.errors && typeof err.errors === 'object') payload.errors = err.errors;
 
   // Only expose stack traces outside production
-  if (process.env.NODE_ENV !== 'production' && err.stack) payload.stack = err.stack.split('\n').map((l: string) => l.trim());
+  if (process.env.NODE_ENV !== 'production' && err.stack)
+    payload.stack = err.stack.split('\n').map((l: string) => l.trim());
 
   return res.status(status).json(payload);
 }
-
