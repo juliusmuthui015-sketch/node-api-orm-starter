@@ -465,8 +465,12 @@ export class EloquentBuilder<T extends Model> {
     const pp = Number.isFinite(Number(perPage)) ? Math.max(1, Math.floor(Number(perPage))) : 15;
     const pg = Number.isFinite(Number(page)) ? Math.max(1, Math.floor(Number(page))) : 1;
     const offset = (pg - 1) * pp;
-    const data = await this.limit(pp).offset(offset).get();
+
+    // Get total count BEFORE applying limit/offset
     const total = await this.getCount();
+
+    // Now apply limit and offset for this page
+    const data = await this.limit(pp).offset(offset).get();
 
     return {
       data,
@@ -776,7 +780,9 @@ export class EloquentBuilder<T extends Model> {
     const instance = new (builder.model as any)();
     const clauses: string[] = [];
     const params: any[] = [];
-    const parentPK = (builder.model as any).primaryKey || 'id';
+    // Use the primaryKey from the model that owns the baseTable context
+    const parentModel = forBuilder ? forBuilder.model : this.model;
+    const parentPK = (parentModel as any).primaryKey || 'id';
 
     builder.hasConditions.forEach((cond) => {
       const relMeta = (instance as any).getRelationship(cond.relation);
@@ -931,7 +937,13 @@ export class EloquentBuilder<T extends Model> {
                   const filters2 = Object.keys(extra2).length
                     ? { $and: [baseFilter2, extra2] }
                     : baseFilter2;
-                  innerActual = await c2.countDocuments(filters2 as any);
+                  // Fetch docs and recursively apply nested has conditions
+                  if ((nestedBuilder as any).hasConditions && (nestedBuilder as any).hasConditions.length) {
+                    const nestedDocs = await c2.find(filters2 as any).toArray();
+                    innerActual = await applyNestedHasForRelatedDocs(nestedDocs, nestedBuilder);
+                  } else {
+                    innerActual = await c2.countDocuments(filters2 as any);
+                  }
                 } else {
                   innerActual = await c2.countDocuments(baseFilter2 as any);
                 }
@@ -942,7 +954,10 @@ export class EloquentBuilder<T extends Model> {
                 if (fkVal2 === undefined || fkVal2 === null) innerActual = 0;
                 else {
                   const c2 = mongoCollection(nestedTable);
-                  const baseFilter2: any = { [ownerKey2]: fkVal2 };
+                  // Normalize field name (id -> _id) for MongoDB and coerce ID value
+                  const normalizedOwnerKey2 = ownerKey2 === 'id' ? '_id' : ownerKey2;
+                  const coercedFkVal2 = normalizedOwnerKey2 === '_id' ? this.coerceId(fkVal2) : fkVal2;
+                  const baseFilter2: any = { [normalizedOwnerKey2]: coercedFkVal2 };
                   if ((nestedModel as any).softDeletes) baseFilter2.deleted_at = null;
                   if (nestedCond.callback) {
                     const nestedBuilder = new EloquentBuilder(nestedModel);
@@ -951,7 +966,13 @@ export class EloquentBuilder<T extends Model> {
                     const filters2 = Object.keys(extra2).length
                       ? { $and: [baseFilter2, extra2] }
                       : baseFilter2;
-                    innerActual = await c2.countDocuments(filters2 as any);
+                    // Fetch docs and recursively apply nested has conditions
+                    if ((nestedBuilder as any).hasConditions && (nestedBuilder as any).hasConditions.length) {
+                      const nestedDocs = await c2.find(filters2 as any).toArray();
+                      innerActual = await applyNestedHasForRelatedDocs(nestedDocs, nestedBuilder);
+                    } else {
+                      innerActual = await c2.countDocuments(filters2 as any);
+                    }
                   } else innerActual = await c2.countDocuments(baseFilter2 as any);
                 }
               } else if (relMeta2.type === 'belongsToMany') {
@@ -974,8 +995,16 @@ export class EloquentBuilder<T extends Model> {
                       nestedCond.callback(nestedBuilder as any);
                       const extra2 = (nestedBuilder as any).buildMongoFilter();
                       if (Object.keys(extra2).length) filter2 = { $and: [filter2, extra2] };
+                      // Recursively apply nested has conditions
+                      if ((nestedBuilder as any).hasConditions && (nestedBuilder as any).hasConditions.length) {
+                        const nestedDocs = await rc2.find(filter2 as any).toArray();
+                        innerActual = await applyNestedHasForRelatedDocs(nestedDocs, nestedBuilder);
+                      } else {
+                        innerActual = await rc2.countDocuments(filter2 as any);
+                      }
+                    } else {
+                      innerActual = await rc2.countDocuments(filter2 as any);
                     }
-                    innerActual = await rc2.countDocuments(filter2 as any);
                   }
                 }
               } else {
@@ -1050,7 +1079,10 @@ export class EloquentBuilder<T extends Model> {
           if (fkVal === undefined || fkVal === null) actual = 0;
           else {
             const c = mongoCollection(relatedTable);
-            const baseFilter: any = { [ownerKey]: fkVal };
+            // Normalize field name (id -> _id) for MongoDB and coerce ID value
+            const normalizedOwnerKey = ownerKey === 'id' ? '_id' : ownerKey;
+            const coercedFkVal = normalizedOwnerKey === '_id' ? this.coerceId(fkVal) : fkVal;
+            const baseFilter: any = { [normalizedOwnerKey]: coercedFkVal };
             if ((relatedModel as any).softDeletes) baseFilter.deleted_at = null;
             if (cond.callback) {
               const constraintBuilder = new EloquentBuilder(relatedModel);
@@ -1950,7 +1982,11 @@ export class EloquentBuilder<T extends Model> {
         const nestedClauses = w.value as WhereClause[];
         const nestedBuilder = new EloquentBuilder<T>(this.model as any);
         (nestedBuilder as any).whereClauses = nestedClauses;
-        return nestedBuilder.buildMongoFilter();
+        const nestedFilter = nestedBuilder.buildMongoFilter();
+        // If nested filter is empty, skip it
+        if (!nestedFilter || Object.keys(nestedFilter).length === 0) return {};
+        // Return the nested filter as-is (it will be part of AND by default since boolean defaults to 'and')
+        return nestedFilter;
       }
       if (Array.isArray(w.value) && (op === 'in' || op === 'not in')) {
         const arr = w.value.map((v) =>
@@ -1998,16 +2034,36 @@ export class EloquentBuilder<T extends Model> {
       }
     };
 
-    for (const w of this.whereClauses) {
+    for (let i = 0; i < this.whereClauses.length; i++) {
+      const w = this.whereClauses[i];
       const f = toFilter(w);
       if (!f || Object.keys(f).length === 0) continue;
-      if ((w.boolean || 'and') === 'or') orParts.push(f);
-      else andParts.push(f);
+
+      // Special handling: if this is a whereNull with an OR following, group them together
+      // This handles the pattern: whereNull(col).orWhere(col, op, val)
+      if (
+        w.operator === '=' &&
+        w.value === null &&
+        i + 1 < this.whereClauses.length &&
+        this.whereClauses[i + 1].column === w.column &&
+        this.whereClauses[i + 1].boolean === 'or'
+      ) {
+        // This whereNull is part of an OR group, so add it to orParts
+        orParts.push(f);
+      } else if ((w.boolean || 'and') === 'or') {
+        orParts.push(f);
+      } else {
+        andParts.push(f);
+      }
     }
 
-    if (orParts.length && andParts.length) return { $and: [{ $and: andParts }, { $or: orParts }] };
+    // Combine AND and OR parts correctly
+    if (orParts.length && andParts.length) {
+      // AND takes precedence: (AND conditions) AND (OR conditions)
+      return { $and: [...andParts, { $or: orParts }] };
+    }
     if (orParts.length) return { $or: orParts };
-    if (andParts.length) return { $and: andParts };
+    if (andParts.length) return andParts.length === 1 ? andParts[0] : { $and: andParts };
     return {};
   }
 
@@ -2133,7 +2189,10 @@ export class EloquentBuilder<T extends Model> {
       return await c.countDocuments(filter);
     }
     // When whereHas/whereDoesntHave exist, fetch minimal docs and post-filter
-    let docs = await c.find(filter, { projection: { _id: 1 } }).toArray();
+    // let docs = await c.find(filter, { projection: { _id: 1 } }).toArray();
+
+      // When whereHas/whereDoesntHave exist, fetch ALL fields (not just _id) so we can access foreign keys
+      let docs = await c.find(filter).toArray();
     docs = docs.map((d) => {
       if (d && d._id && !('id' in d)) d.id = String(d._id);
       return d;
