@@ -7,4 +7,3 @@ export function asyncContextMiddleware(req: Request, res: Response, next: NextFu
   // Create a fresh store for each request so downstream code (and helpers) can access it
   asyncLocalStorage.run({ req }, () => next());
 }
-
