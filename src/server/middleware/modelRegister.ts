@@ -21,14 +21,18 @@ export async function registerModelsIntoCache() {
           // Resolve TS path alias via compiled outputs when running from build; prefer require for CJS
           const mod = require(full);
           for (const [key, val] of Object.entries(mod)) {
-            if (typeof val === 'function' && val.prototype && (val.prototype instanceof Model)) {
+            if (typeof val === 'function' && val.prototype && val.prototype instanceof Model) {
               const className = key;
               RouterBuilder.registerModel(className, val as unknown as typeof Model);
               found.push({ name: className, file: full });
             }
           }
           // Default export case
-          if (typeof mod.default === 'function' && mod.default.prototype && (mod.default.prototype instanceof Model)) {
+          if (
+            typeof mod.default === 'function' &&
+            mod.default.prototype &&
+            mod.default.prototype instanceof Model
+          ) {
             const className = mod.default.name || path.parse(ent.name).name;
             RouterBuilder.registerModel(className, mod.default as unknown as typeof Model);
             found.push({ name: className, file: full });
