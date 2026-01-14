@@ -5,7 +5,9 @@ import { Request, Response, NextFunction } from 'express';
 export function requestLoggerMiddleware(req: Request, res: Response, next: NextFunction) {
   const start = process.hrtime();
   const { method, originalUrl } = req;
-  const ip = (req.ip || req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress)) as string | undefined;
+  const ip = (req.ip ||
+    req.headers['x-forwarded-for'] ||
+    (req.socket && req.socket.remoteAddress)) as string | undefined;
   const maybeUser = (req as any).user;
 
   res.on('finish', () => {
@@ -22,15 +24,20 @@ export function requestLoggerMiddleware(req: Request, res: Response, next: NextF
     if (status >= 500) color = red;
     else if (status >= 400) color = yellow;
 
-    const userInfo = maybeUser ? ` - user:${maybeUser.id ?? maybeUser.email ?? JSON.stringify(maybeUser)}` : '';
-    const query = req.query && Object.keys(req.query).length ? ` query=${JSON.stringify(req.query)}` : '';
-    const params = req.params && Object.keys(req.params).length ? ` params=${JSON.stringify(req.params)}` : '';
+    const userInfo = maybeUser
+      ? ` - user:${maybeUser.id ?? maybeUser.email ?? JSON.stringify(maybeUser)}`
+      : '';
+    const query =
+      req.query && Object.keys(req.query).length ? ` query=${JSON.stringify(req.query)}` : '';
+    const params =
+      req.params && Object.keys(req.params).length ? ` params=${JSON.stringify(req.params)}` : '';
 
-    console.log(`${method} ${originalUrl} ${color}${status}${reset} - ${ms} ms - ${ip || '-'}${userInfo}${query}${params}`);
+    console.log(
+      `${method} ${originalUrl} ${color}${status}${reset} - ${ms} ms - ${ip || '-'}${userInfo}${query}${params}`,
+    );
   });
 
   next();
 }
 
 export default requestLoggerMiddleware;
-
