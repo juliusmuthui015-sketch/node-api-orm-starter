@@ -2087,8 +2087,10 @@ export class EloquentBuilder<T extends Model> {
                 [this.normalizeField(this.orderByColumn)]: this.orderByDirection === 'asc' ? 1 : -1,
             });
         }
-        if (this.offsetValue !== undefined) cursor = cursor.skip(this.offsetValue);
-        if (this.limitValue !== undefined) cursor = cursor.limit(this.limitValue);
+        // IMPORTANT: Apply limit and offset AFTER whereHas filtering, not before
+        // So we don't apply them here yet if there are hasConditions
+        if (this.offsetValue !== undefined && !this.hasConditions.length) cursor = cursor.skip(this.offsetValue);
+        if (this.limitValue !== undefined && !this.hasConditions.length) cursor = cursor.limit(this.limitValue);
         let docs = await cursor.toArray();
         docs = docs.map((d) => {
             if (d && d._id && !('id' in d)) d.id = String(d._id);
@@ -2097,6 +2099,13 @@ export class EloquentBuilder<T extends Model> {
         // Post-filter by whereHas/whereDoesntHave conditions for Mongo
         if (this.hasConditions.length) {
             docs = await this.applyHasConditionsMongo(docs);
+            // NOW apply limit and offset after whereHas filtering
+            if (this.offsetValue !== undefined) {
+                docs = docs.slice(this.offsetValue);
+            }
+            if (this.limitValue !== undefined) {
+                docs = docs.slice(0, this.limitValue);
+            }
         }
         return docs;
     }
