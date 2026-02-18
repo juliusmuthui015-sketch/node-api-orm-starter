@@ -14,11 +14,10 @@ import UserController from '@/app/Http/Controllers/User/UserController';
 import RoleController from '@/app/Http/Controllers/User/RoleController';
 import PermissionController from '@/app/Http/Controllers/User/PermissionController';
 import RouterBuilder from '@/eloquent/Router/router';
-import FileController, {multerUpload} from "@/app/Http/Controllers/File/FileController";
+import FileController, { multerUpload } from '@/app/Http/Controllers/File/FileController';
 
 export const routesBuilder = new RouterBuilder();
 const rb = routesBuilder;
-const UC = UserController;
 
 /*
 |--------------------------------------------------------------------------
@@ -26,9 +25,9 @@ const UC = UserController;
 |--------------------------------------------------------------------------
 */
 rb.prefix('/auth').group((g: RouterBuilder) => {
-    g.post('/register', AuthController.register);
-    g.post('/login', AuthController.login);
-    g.get('/me', 'auth', AuthController.me);
+  g.post('/register', AuthController.register);
+  g.post('/login', AuthController.login);
+  g.get('/me', 'auth', AuthController.me);
 });
 
 /*
@@ -37,22 +36,21 @@ rb.prefix('/auth').group((g: RouterBuilder) => {
 |--------------------------------------------------------------------------
 */
 rb.prefix('/users')
-    .middleware(['auth', 'must-be-active'])
-    .group((g: RouterBuilder) => {
-        g.get('/', 'can:view_users', UserController.index);
-        g.get('/:id', 'can:view_users', UserController.show);
-        g.get('/:id/profile', UC.showProfile);
-        g.post('/', 'can:create_users', UserController.store);
-        g.put('/:id', 'can:update_users', UserController.update);
-        g.put('/:id/profile', UC.updateProfile);
-        g.post('/:id/password', 'can:update_users', UC.setPassword);
-        g.post('/:id/password/reset', UC.resetPassword);
-        g.post('/:id/roles', 'can:add_roles_to_users', UC.addRole);
-        g.delete('/:id/roles/:roleId', 'can:remove_roles_from_users', UC.removeRole);
-        g.delete('/:id', 'can:delete_users', UC.destroy);
-        g.patch('/:user/status', 'can:activate_and_deactivate_users', UC.toggleStatus);
-        // landlord-specific routes removed for starter template
-    });
+  .middleware(['auth', 'must-be-active'])
+  .group((g: RouterBuilder) => {
+    g.get('/', 'can:view_users', UserController.index);
+    g.get('/:id', 'can:view_users', UserController.show);
+    g.get('/:id/profile', UserController.showProfile);
+    g.post('/', 'can:create_users', UserController.store);
+    g.put('/:id', 'can:update_users', UserController.update);
+    g.put('/:id/profile', UserController.updateProfile);
+    g.post('/:id/password', 'can:update_users', UserController.setPassword);
+    g.post('/:id/password/reset', UserController.resetPassword);
+    g.post('/:id/roles', 'can:add_roles_to_users', UserController.addRole);
+    g.delete('/:id/roles/:roleId', 'can:remove_roles_from_users', UserController.removeRole);
+    g.delete('/:id', 'can:delete_users', UserController.destroy);
+    g.patch('/:user/status', 'can:activate_and_deactivate_users', UserController.toggleStatus);
+  });
 
 /*
 |--------------------------------------------------------------------------
@@ -60,15 +58,15 @@ rb.prefix('/users')
 |--------------------------------------------------------------------------
 */
 rb.prefix('/roles')
-    .middleware(['auth', 'must-be-active'])
-    .group((g: RouterBuilder) => {
-        g.get('/', 'can:view_roles', RoleController.index);
-        g.get('/:role', 'can:view_roles', RoleController.show);
-        g.post('/', 'can:create_roles', RoleController.store);
-        g.put('/:id', 'can:update_roles', RoleController.update);
-        g.delete('/:id', 'can:delete_roles', RoleController.destroy);
-        g.post('/:id/permissions', 'can:add_permissions_to_roles', RoleController.syncPermissions);
-    });
+  .middleware(['auth', 'must-be-active'])
+  .group((g: RouterBuilder) => {
+    g.get('/', 'can:view_roles', RoleController.index);
+    g.get('/:role', 'can:view_roles', RoleController.show);
+    g.post('/', 'can:create_roles', RoleController.store);
+    g.put('/:id', 'can:update_roles', RoleController.update);
+    g.delete('/:id', 'can:delete_roles', RoleController.destroy);
+    g.post('/:id/permissions', 'can:add_permissions_to_roles', RoleController.syncPermissions);
+  });
 
 /*
 |--------------------------------------------------------------------------
@@ -76,12 +74,11 @@ rb.prefix('/roles')
 |--------------------------------------------------------------------------
 */
 rb.prefix('/permissions')
-    .middleware(['auth', 'must-be-active'])
-    .group((g: RouterBuilder) => {
-        g.get('/', 'can:view_permissions', PermissionController.index);
-        g.get('/:id', 'can:view_permissions', PermissionController.show);
-    });
-
+  .middleware(['auth', 'must-be-active'])
+  .group((g: RouterBuilder) => {
+    g.get('/', 'can:view_permissions', PermissionController.index);
+    g.get('/:id', 'can:view_permissions', PermissionController.show);
+  });
 
 /*
 |--------------------------------------------------------------------------
@@ -89,19 +86,19 @@ rb.prefix('/permissions')
 |--------------------------------------------------------------------------
 */
 rb.prefix('/files')
-    .middleware(['auth', 'must-be-active'])
-    .group((g: RouterBuilder) => {
-        g.get('/', 'can:view_files', FileController.index);
-        g.get('/:id', 'can:view_files', FileController.show);
-        g.get('/:id/download', 'can:view_files', FileController.download);
-        g.get('/:id/view', 'can:view_files', FileController.view);
-        g.post('/', [multerUpload.single('file'), 'can:upload_files'] as any, FileController.store);
-        g.post('/raw', 'can:upload_files', FileController.storeRaw);
-        g.get('/:id/signed-url', 'can:view_files', FileController.signedUrl);
-        g.get('/:id/signed-thumbnail', 'can:view_files', FileController.signedThumbnailUrl);
-        g.delete('/:id', 'can:delete_files', FileController.destroy);
-        g.get('/:id/thumbnail', 'can:view_files', FileController.thumbnail);
-        g.post('/:id/thumbnail/regenerate', 'can:upload_files', FileController.regenerateThumbnail);
-    });
-export default rb;
+  .middleware(['auth', 'must-be-active'])
+  .group((g: RouterBuilder) => {
+    g.get('/', 'can:view_files', FileController.index);
+    g.get('/:id', 'can:view_files', FileController.show);
+    g.get('/:id/download', 'can:view_files', FileController.download);
+    g.get('/:id/view', 'can:view_files', FileController.view);
+    g.post('/', [multerUpload.single('file'), 'can:upload_files'] as any, FileController.store);
+    g.post('/raw', 'can:upload_files', FileController.storeRaw);
+    g.get('/:id/signed-url', 'can:view_files', FileController.signedUrl);
+    g.get('/:id/signed-thumbnail', 'can:view_files', FileController.signedThumbnailUrl);
+    g.delete('/:id', 'can:delete_files', FileController.destroy);
+    g.get('/:id/thumbnail', 'can:view_files', FileController.thumbnail);
+    g.post('/:id/thumbnail/regenerate', 'can:upload_files', FileController.regenerateThumbnail);
+  });
 
+export default rb;

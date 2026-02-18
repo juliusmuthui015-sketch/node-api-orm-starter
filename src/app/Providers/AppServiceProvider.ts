@@ -1,10 +1,7 @@
 import { ServiceProvider, ServiceProviderClass } from '@/eloquent/Providers/ServiceProvider';
-import { ReportCacheObserver } from '@/app/Observers/ReportCacheObserver';
-import User from '@/app/Models/User/User';
-import { Model } from '@/eloquent/Model';
-import {DatabaseServiceProvider} from '@/app/Providers/DatabaseServiceProvider';
-import {CacheServiceProvider} from '@/app/Providers/CacheServiceProvider';
-import {RouteServiceProvider} from "@/app";
+import { DatabaseServiceProvider } from '@/app/Providers/DatabaseServiceProvider';
+import { CacheServiceProvider } from '@/app/Providers/CacheServiceProvider';
+import { RouteServiceProvider } from '@/app';
 
 export class AppServiceProvider extends ServiceProvider {
     /*
@@ -19,7 +16,8 @@ export class AppServiceProvider extends ServiceProvider {
     protected additionalProviders: ServiceProviderClass[] = [
         DatabaseServiceProvider,
         CacheServiceProvider,
-        RouteServiceProvider
+        RouteServiceProvider,
+        // Add your custom providers here:
         // Example: BillingServiceProvider,
         // Example: NotificationServiceProvider,
     ];
@@ -33,8 +31,9 @@ export class AppServiceProvider extends ServiceProvider {
         // Register additional providers
         this.registerProviders(this.additionalProviders);
 
-        // Register singleton services
-        // No domain-specific singleton services in starter template
+        // Register your singleton services here:
+        // Example: this.container.singleton(MyService);
+        // Example: this.container.alias(MyService, 'my-service');
     }
 
     /*
@@ -51,17 +50,19 @@ export class AppServiceProvider extends ServiceProvider {
     |--------------------------------------------------------------------------
     | Register Model Observers
     |--------------------------------------------------------------------------
+    |
+    | Register observers for your models here. Observers allow you to
+    | listen for model events like created, updated, deleted, etc.
+    |
     */
     protected registerObservers(): void {
-        const models: Array<typeof Model> = [
-            User,
-        ];
-
-        for (const model of models) {
-            if (typeof (model as typeof Model).observe === 'function') {
-                model.observe(ReportCacheObserver);
-            }
-        }
+        // Example: Register an observer for the User model
+        // const models: Array<typeof Model> = [User];
+        // for (const model of models) {
+        //     if (typeof model.observe === 'function') {
+        //         model.observe(YourObserver);
+        //     }
+        // }
     }
 
     /*

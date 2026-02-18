@@ -1,5 +1,5 @@
 import readline from 'readline';
-import { initDatabase, query, getDbType, getMongoDb } from '@config/db.config';
+import { initDatabase, query, getDbType, getMongoDb } from '@/config/db.config';
 import path from 'path';
 
 function parseArgs(argv: string[]) {

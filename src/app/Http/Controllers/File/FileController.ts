@@ -7,6 +7,7 @@ import FileService from '@/app/Services/FileService';
 import File from '@/app/Models/File/File';
 import { ValidationError } from '@/app/Helpers/validator';
 import { parseRequest } from '@/app/Helpers/auth';
+
 type MulterFile = Express.Multer.File;
 
 // Multer storage configuration
@@ -30,6 +31,7 @@ const storage = multer.diskStorage({
     cb(null, unique + '-' + safeOriginal);
   },
 });
+
 export const multerUpload = multer({
   storage,
   limits: { fileSize: MAX_UPLOAD_SIZE },
@@ -41,13 +43,10 @@ export const multerUpload = multer({
   },
 });
 
-const JWT_SECRET: jwt.Secret = (process.env.FILE_URL_SECRET ||
-  process.env.JWT_SECRET ||
-  'dev-secret-change') as jwt.Secret;
+const JWT_SECRET: string = process.env.FILE_URL_SECRET || process.env.JWT_SECRET || 'dev-secret-change';
 
 export default {
   async index(req: Request, res: Response) {
-    // validate query filters (soft fail as pattern used elsewhere)
     const queryRules: any = {
       user_id: 'nullable|exists:users,id',
       page: 'nullable|int',
@@ -61,27 +60,31 @@ export default {
     const data = await FileService.list(parseRequest(req));
     res.json(data);
   },
+
   async show(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:files,id' });
+      await req.validate({ id }, { id: 'required|exists:files,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const file = await FileService.find(req.params.id);
+    const file = await FileService.find(id);
     if (!file) return res.status(404).json({ message: 'Not found' });
     res.json(file.toJSON());
   },
+
   async download(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:files,id' });
+      await req.validate({ id }, { id: 'required|exists:files,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const file = await FileService.find(req.params.id);
+    const file = await FileService.find(id);
     if (!file) return res.status(404).json({ message: 'Not found' });
     const diskPath = (file as any).disk_path;
     if (!diskPath || !fs.existsSync(diskPath))
@@ -91,8 +94,8 @@ export default {
     res.setHeader('Content-Disposition', `attachment; filename="${(file as any).original_name}"`);
     fs.createReadStream(diskPath).pipe(res);
   },
+
   async store(req: Request, res: Response) {
-    // Multer has already processed the file
     const user = (req as any).user;
     const upload = (req as any).file as MulterFile | undefined;
     if (!upload) return res.status(400).json({ message: 'No file uploaded' });
@@ -114,11 +117,12 @@ export default {
       });
     }
   },
+
   async storeRaw(req: Request, res: Response) {
     const rules = {
       filename: 'required|string',
       mime_type: 'required|string',
-      content: 'required|string', // base64
+      content: 'required|string',
     } as any;
     let validated: any;
     try {
@@ -149,44 +153,49 @@ export default {
       return res.status(500).json({ message: 'Raw upload failed', error: String(e) });
     }
   },
+
   async destroy(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:files,id' });
+      await req.validate({ id }, { id: 'required|exists:files,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const file = await File.find(req.params.id);
+    const file = await File.find(id);
     if (!file) return res.status(404).json({ message: 'Not found' });
     const user = (req as any).user;
     const isOwner =
       user && (file as any).user_id && String(user.id) === String((file as any).user_id);
     const canDelete = isOwner || (user && (user.roles || []).includes('admin'));
     if (!canDelete) return res.status(403).json({ message: 'Forbidden' });
-    const ok = await FileService.delete(req.params.id);
+    const ok = await FileService.delete(id);
     if (!ok) return res.status(404).json({ message: 'Not found' });
     res.json({ success: true });
   },
+
   async signedUrl(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:files,id' });
+      await req.validate({ id }, { id: 'required|exists:files,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const file = await FileService.find(req.params.id);
+    const file = await FileService.find(id);
     if (!file) return res.status(404).json({ message: 'Not found' });
-    const expiresInSec = parseInt(process.env.FILE_URL_EXPIRES || '900'); // 15 minutes default
+    const expiresInSec = parseInt(process.env.FILE_URL_EXPIRES || '900');
     const payload = { file_id: (file as any).id } as any;
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: expiresInSec });
     const url = `${process.env.APP_URL || 'http://localhost:3000'}/public/files/${token}`;
     const expires_at = new Date(Date.now() + expiresInSec * 1000).toISOString();
     res.json({ url, token, expires_at });
   },
+
   async publicDownload(req: Request, res: Response) {
-    const token = req.params.token;
+    const token = req.params.token as string;
     let decoded: any;
     try {
       decoded = jwt.verify(token, JWT_SECRET);
@@ -203,42 +212,44 @@ export default {
     res.setHeader('Content-Disposition', `attachment; filename="${(file as any).original_name}"`);
     fs.createReadStream(diskPath).pipe(res);
   },
+
   async view(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:files,id' });
+      await req.validate({ id }, { id: 'required|exists:files,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const file = await FileService.find(req.params.id);
+    const file = await FileService.find(id);
     if (!file) return res.status(404).json({ message: 'Not found' });
     const diskPath = (file as any).disk_path;
     if (!diskPath || !fs.existsSync(diskPath))
       return res.status(404).json({ message: 'File missing on disk' });
     res.setHeader('Content-Type', (file as any).mime_type || 'application/octet-stream');
-    // Inline disposition (or omit entirely); using inline allows browser preview
     res.setHeader('Content-Disposition', `inline; filename="${(file as any).original_name}"`);
     fs.createReadStream(diskPath).pipe(res);
   },
+
   async thumbnail(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:files,id' });
+      await req.validate({ id }, { id: 'required|exists:files,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const file: any = await FileService.find(req.params.id);
+    const file: any = await FileService.find(id);
     if (!file) return res.status(404).json({ message: 'Not found' });
     if (!/^(image\/(jpeg|png|webp|gif))$/.test(file.mime_type))
       return res.status(404).json({ message: 'No thumbnail' });
-    const size = (req.query.size as string) || undefined; // e.g. sm, md
+    const size = (req.query.size as string) || undefined;
     const format = req.query.format as string as 'webp' | 'original' | undefined;
-    const thumbPath = await FileService.getThumbnailVariant(req.params.id, size, format);
+    const thumbPath = await FileService.getThumbnailVariant(id, size, format);
     if (!thumbPath || !fs.existsSync(thumbPath))
       return res.status(404).json({ message: 'Thumbnail not generated' });
-    // Determine content type by file extension
     const ext = path.extname(thumbPath).toLowerCase();
     const contentType =
       ext === '.webp'
@@ -255,31 +266,35 @@ export default {
     res.setHeader('Content-Disposition', `inline; filename="${downloadName}"`);
     fs.createReadStream(thumbPath).pipe(res);
   },
+
   async regenerateThumbnail(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:files,id' });
+      await req.validate({ id }, { id: 'required|exists:files,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const file: any = await FileService.find(req.params.id);
+    const file: any = await FileService.find(id);
     if (!file) return res.status(404).json({ message: 'Not found' });
     if (!/^(image\/(jpeg|png|webp|gif))$/.test(file.mime_type))
       return res.status(404).json({ message: 'Not an image' });
-    const thumbPath = await FileService.regenerateThumbnail(req.params.id);
+    const thumbPath = await FileService.regenerateThumbnail(id);
     if (!thumbPath) return res.status(500).json({ message: 'Regeneration failed' });
     res.json({ success: true, thumbnail_path: thumbPath, thumbnails: file.thumbnails || {} });
   },
+
   async signedThumbnailUrl(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:files,id' });
+      await req.validate({ id }, { id: 'required|exists:files,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const file: any = await FileService.find(req.params.id);
+    const file: any = await FileService.find(id);
     if (!file) return res.status(404).json({ message: 'Not found' });
     if (!/^(image\/(jpeg|png|webp|gif))$/.test(file.mime_type))
       return res.status(404).json({ message: 'No thumbnail' });
@@ -294,8 +309,9 @@ export default {
     const expires_at = new Date(Date.now() + expiresInSec * 1000).toISOString();
     res.json({ url, token, expires_at, size: size || null, format: format || null });
   },
+
   async publicThumbnail(req: Request, res: Response) {
-    const token = req.params.token;
+    const token = req.params.token as string;
     let decoded: any;
     try {
       decoded = jwt.verify(token, JWT_SECRET);

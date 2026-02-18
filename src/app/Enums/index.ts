@@ -1,7 +1,13 @@
+/*
+|--------------------------------------------------------------------------
+| User Types Enum
+|--------------------------------------------------------------------------
+|
+| Define the types of users in your application.
+| Extend this enum as needed for your use case.
+|
+*/
 export enum EUserType {
   ADMIN = 'admin',
-  TENANT = 'tenant',
-  LANDLORD = 'landlord',
-  AGENT = 'agent',
-  CARETAKER = 'caretaker',
+  USER = 'user',
 }

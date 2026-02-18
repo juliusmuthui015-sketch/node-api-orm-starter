@@ -7,10 +7,20 @@ import { RolesUsers } from '@/app/Models/User/RolesUsers';
 import { Cacheable, Sortable, Timestamps } from '@/eloquent/Traits/built-ins';
 import { SoftDeletes } from '@/eloquent/Traits/SoftDeletes';
 
+/*
+|--------------------------------------------------------------------------
+| User Model
+|--------------------------------------------------------------------------
+|
+| The User model represents authenticated users in the application.
+| It includes relationships for roles, profile, and files.
+|
+*/
+
 @use(Sortable, SoftDeletes, Timestamps, Cacheable)
 export class User extends Model {
-  // static table = 'users';
   static primaryKey = 'id';
+
   static fillable = [
     'name',
     'email',
@@ -30,11 +40,12 @@ export class User extends Model {
     'avatar',
     'dark_mode',
     'messenger_color',
-    'phone_number', // removed legacy landlord_id
+    'phone_number',
   ];
+
   static hidden = ['password', 'remember_token'];
+
   static casts = {
-    // id: 'int',
     active_status: 'int',
     dark_mode: 'int',
     created_at: 'datetime',
@@ -44,17 +55,16 @@ export class User extends Model {
     last_seen_at: 'datetime',
   } as any;
 
-  // static relationships = {
-  //     roles: {
-  //         type: 'belongsToMany',
-  //         model: Role,
-  //         table: ['roles', 'users'].sort().join('_') // roles_users
-  //     }
-  // } as any;
+  /*
+  |--------------------------------------------------------------------------
+  | Relationships
+  |--------------------------------------------------------------------------
+  */
 
   roles() {
     return this.belongsToMany(Role, RolesUsers.getTable(), 'users_id', 'roles_id');
   }
+
   profile() {
     return this.hasOne(UserProfile, 'user_id', 'id');
   }
@@ -63,42 +73,50 @@ export class User extends Model {
     return this.hasMany(FileModel, 'user_id');
   }
 
+  /*
+  |--------------------------------------------------------------------------
+  | Helper Methods
+  |--------------------------------------------------------------------------
+  */
+
+  /**
+   * Check if the user is an admin
+   */
   isAdmin() {
-    return this.getUserType(EUserType.ADMIN);
+    return this.hasUserType(EUserType.ADMIN);
   }
 
-  isAgent() {
-    return this.getUserType(EUserType.AGENT);
-  }
-
-  isLandlord() {
-    return this.getUserType(EUserType.LANDLORD);
-  }
-
-  isTenant() {
-    return this.getUserType(EUserType.TENANT);
-  }
-
-  isCaretaker() {
-    return this.getUserType(EUserType.CARETAKER);
-  }
-
-  private getUserType(type: EUserType) {
-    if (typeof this.profile == 'function') {
+  /**
+   * Check if the user has a specific type via their profile
+   */
+  private hasUserType(type: EUserType) {
+    if (typeof this.profile === 'function') {
       return this.profile().where('type', type).exists();
     }
-
-    return (this as any)?.profile?.type == type;
+    return (this as any)?.profile?.type === type;
   }
 
-  // defaults for new instances
-  constructor(attributes: any = {}) {
-    super({ avatar: 'avatar.png', active_status: 0, dark_mode: 0, ...attributes });
-  }
-
+  /**
+   * Check if the user account is active
+   */
   isActive() {
-      const status = this.getAttribute("status")
-      return (typeof status) == "undefined"  || status && (status == "active" || status == null)
+    const status = this.getAttribute('status');
+    return typeof status === 'undefined' || status === null || status === 'active';
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Constructor
+  |--------------------------------------------------------------------------
+  */
+
+  constructor(attributes: any = {}) {
+    super({
+      avatar: 'avatar.png',
+      active_status: 0,
+      dark_mode: 0,
+      ...attributes
+    });
   }
 }
 

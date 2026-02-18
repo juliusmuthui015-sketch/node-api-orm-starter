@@ -16,6 +16,7 @@ export default {
   async index(req: Request, res: Response) {
     res.json(await roleService.list());
   },
+
   async show(req: Request, res: Response, role: Role) {
     let validated: any;
     if (!role) {
@@ -34,6 +35,7 @@ export default {
     if (!item) return res.status(404).json({ message: 'Not found' });
     res.json(item);
   },
+
   async store(req: Request, res: Response) {
     const rules: any = {
       name: 'required|string|max:191',
@@ -55,9 +57,11 @@ export default {
       throw e;
     }
   },
+
   async update(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:roles,id' });
+      await req.validate({ id }, { id: 'required|exists:roles,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
@@ -65,7 +69,7 @@ export default {
     }
     const rules: any = {
       name: 'nullable|string|max:191',
-      slug: 'nullable|string|max:191|unique:roles,slug,' + req.params.id,
+      slug: 'nullable|string|max:191|unique:roles,slug,' + id,
       description: 'nullable|string',
     };
     try {
@@ -75,7 +79,7 @@ export default {
       roleFields.forEach((f) => {
         if (validated[f] !== undefined) clean[f] = validated[f];
       });
-      const item = await roleService.update(req.params.id, clean);
+      const item = await roleService.update(id, clean);
       if (!item) return res.status(404).json({ message: 'Not found' });
       res.json(item);
     } catch (e) {
@@ -84,23 +88,26 @@ export default {
       throw e;
     }
   },
+
   async destroy(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:roles,id' });
+      await req.validate({ id }, { id: 'required|exists:roles,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const ok = await roleService.delete(req.params.id);
+    const ok = await roleService.delete(id);
     if (!ok) return res.status(404).json({ message: 'Not found' });
     res.json({ success: true });
   },
+
   async syncPermissions(req: Request, res: Response) {
-    // body.permissions: array of ints
+    const id = req.params.id as string;
     const rules: any = { permissions: 'required|array' };
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:roles,id' });
+      await req.validate({ id }, { id: 'required|exists:roles,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
@@ -115,7 +122,7 @@ export default {
       throw e;
     }
     const ids = validated.permissions ?? [];
-    const updated = await roleService.attachPermissions(req.params.id, ids);
+    const updated = await roleService.attachPermissions(id, ids);
     if (!updated) return res.status(404).json({ message: 'Not found' });
     res.json(updated);
   },

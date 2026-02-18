@@ -11,13 +11,10 @@ module.exports.up = async function (schema: MigrationSchema, query: QueryFn) {
     table.enum('gender', ['male', 'female', 'other']).notNullable();
     table
       .enum('type', [
-        EUserType.CARETAKER,
-        EUserType.TENANT,
         EUserType.ADMIN,
-        EUserType.AGENT,
-        EUserType.LANDLORD,
+        EUserType.USER,
       ])
-      .default(EUserType.TENANT)
+      .default(EUserType.USER)
       .notNullable();
     table.string('id_number').nullable();
     table.string('city').nullable();

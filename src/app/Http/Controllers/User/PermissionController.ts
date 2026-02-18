@@ -12,14 +12,15 @@ export default {
     res.json(await permissionService.list());
   },
   async show(req: Request, res: Response) {
+    const id = req.params.id as string;
     try {
-      await req.validate({ id: req.params.id }, { id: 'required|exists:permissions,id' });
+      await req.validate({ id }, { id: 'required|exists:permissions,id' });
     } catch (e) {
       if (e instanceof ValidationError)
         return res.status(422).json({ errors: e.errors, messages: e.messages });
       throw e;
     }
-    const item = await permissionService.find(req.params.id);
+    const item = await permissionService.find(id);
     if (!item) return res.status(404).json({ message: 'Not found' });
     res.json(item);
   },

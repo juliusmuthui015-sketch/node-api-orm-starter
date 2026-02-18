@@ -2,7 +2,7 @@ import { Argv } from 'yargs';
 import { Command } from '@/eloquent/Command/Command';
 
 // Import all commands from the index
-import * as Commands from '@app/Console/Commands';
+import * as Commands from '@/app/Console/Commands';
 import path from "path";
 
 export class Kernel {
