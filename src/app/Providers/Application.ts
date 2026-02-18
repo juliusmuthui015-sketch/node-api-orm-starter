@@ -1,0 +1,248 @@
+import express, { Application as ExpressApp, RequestHandler } from 'express';
+import cors from 'cors';
+import { Container } from '@/eloquent/Container/Container';
+import { ServiceProvider, ServiceProviderClass } from '@/eloquent/Providers/ServiceProvider';
+import { query as dbQuery } from '@/config/db.config';
+
+export class Application {
+    private providers: ServiceProvider[] = [];
+    private loadedProviders: Map<string, ServiceProvider> = new Map();
+    private deferredServices: Map<string, ServiceProviderClass> = new Map();
+    private booted = false;
+    private expressApp: ExpressApp;
+
+    constructor(public container: Container) {
+        this.expressApp = express();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Service Providers
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Register a service provider with the application.
+     */
+    register(provider: ServiceProviderClass, force: boolean = false): ServiceProvider {
+        // Check if already registered
+        const providerName = provider.name;
+        if (!force && this.loadedProviders.has(providerName)) {
+            return this.loadedProviders.get(providerName)!;
+        }
+
+        // Create instance
+        const instance = new provider(this);
+
+        // Mark the provider as registered
+        this.markAsRegistered(instance);
+
+        // If the application has already booted, boot the provider immediately
+        if (this.booted) {
+            this.bootProvider(instance);
+        }
+
+        return instance;
+    }
+
+    /**
+     * Mark the given provider as registered.
+     */
+    protected markAsRegistered(provider: ServiceProvider): void {
+        this.providers.push(provider);
+        this.loadedProviders.set(provider.constructor.name, provider);
+
+        // Call register method
+        provider.register();
+    }
+
+    /**
+     * Register a deferred provider and service.
+     */
+    registerDeferredProvider(provider: ServiceProviderClass): void {
+        const instance = new provider(this);
+        const services = instance.provides();
+
+        for (const service of services) {
+            this.deferredServices.set(service, provider);
+        }
+    }
+
+    /**
+     * Load and boot a deferred provider if needed.
+     */
+    loadDeferredProvider(service: string): void {
+        if (!this.deferredServices.has(service)) {
+            return;
+        }
+
+        const provider = this.deferredServices.get(service)!;
+
+        // Remove from deferred list
+        this.deferredServices.delete(service);
+
+        // Register the provider
+        this.register(provider);
+    }
+
+    /**
+     * Resolve a deferred service if it exists.
+     */
+    make<T>(abstract: string | (new (...args: any[]) => T)): T {
+        const key = typeof abstract === 'string' ? abstract : abstract.name;
+
+        // Load deferred provider if needed
+        if (this.deferredServices.has(key)) {
+            this.loadDeferredProvider(key);
+        }
+
+        return this.container.make<T>(abstract);
+    }
+
+    /**
+     * Boot the application's service providers.
+     */
+    async boot(): Promise<void> {
+        if (this.booted) return;
+
+        // Call booting callbacks on all providers
+        for (const provider of this.providers) {
+            await provider.callBootingCallbacks();
+        }
+
+        // Boot all providers
+        for (const provider of this.providers) {
+            await this.bootProvider(provider);
+        }
+
+        // Call booted callbacks on all providers
+        for (const provider of this.providers) {
+            await provider.callBootedCallbacks();
+        }
+
+        this.booted = true;
+    }
+
+    /**
+     * Boot the given service provider.
+     */
+    protected async bootProvider(provider: ServiceProvider): Promise<void> {
+        await provider.boot();
+    }
+
+    /**
+     * Get all registered service providers.
+     */
+    getProviders(): ServiceProvider[] {
+        return this.providers;
+    }
+
+    /**
+     * Get a specific provider by class name.
+     */
+    getProvider(providerClass: ServiceProviderClass): ServiceProvider | undefined {
+        return this.loadedProviders.get(providerClass.name);
+    }
+
+    /**
+     * Determine if the application has booted.
+     */
+    isBooted(): boolean {
+        return this.booted;
+    }
+
+    /**
+     * Get the deferred services and their providers.
+     */
+    getDeferredServices(): Map<string, ServiceProviderClass> {
+        return this.deferredServices;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Express App Access
+    |--------------------------------------------------------------------------
+    */
+
+    getExpressApp(): ExpressApp {
+        return this.expressApp;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Middleware Registration
+    |--------------------------------------------------------------------------
+    */
+
+    useMiddleware(middleware: RequestHandler): void {
+        this.expressApp.use(middleware);
+    }
+
+    useMiddlewares(middlewares: RequestHandler[]): void {
+        for (const middleware of middlewares) {
+            this.expressApp.use(middleware);
+        }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Route Mounting
+    |--------------------------------------------------------------------------
+    */
+
+    mountRoutes(prefix: string, router: any): void {
+        this.expressApp.use(prefix, router);
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Configure Base Middleware
+    |--------------------------------------------------------------------------
+    */
+
+    configureBaseMiddleware(): void {
+        this.expressApp.use(cors());
+        this.expressApp.use(express.json());
+        this.expressApp.use(express.urlencoded({ extended: true }));
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Configure Error Handlers
+    |--------------------------------------------------------------------------
+    */
+
+    configure404Handler(): void {
+        this.expressApp.use((req, res) => {
+            res.status(404).json({
+                success: false,
+                message: `Cannot ${req.method} ${req.originalUrl}`,
+            });
+        });
+    }
+
+    configureErrorHandler(handler: RequestHandler): void {
+        this.expressApp.use(handler);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Start Server
+    |--------------------------------------------------------------------------
+    */
+
+    listen(port: number | string, callback?: () => void): void {
+        this.expressApp.listen(port, callback);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Database Query (for internal use)
+    |--------------------------------------------------------------------------
+    */
+
+    async query(sql: string, params?: any[]): Promise<any> {
+        return dbQuery(sql, params);
+    }
+}

@@ -19,7 +19,7 @@ async function run() {
   console.log('Auth check (expected false):', auth().check());
 }
 
-run().catch(e => {
+run().catch((e) => {
   console.error('Smoke test failed', e);
   process.exit(1);
 });

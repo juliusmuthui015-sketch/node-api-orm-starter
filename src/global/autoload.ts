@@ -2,9 +2,9 @@
 // This lets you use User, Role, Permission, cacheGet, auth(), etc. without importing.
 // Keep this lightweight; only include stable, frequently used APIs.
 
-import * as Models from '@/server/Models/User';
+import * as Models from '@/app/Models/User';
 import * as CacheFns from '@/cache';
-import * as AuthHelpers from '@/server/helpers/auth';
+import * as AuthHelpers from '@/app/Helpers/auth';
 
 function defineGlobal(name: string, value: any) {
   if ((globalThis as any)[name] !== undefined) return; // avoid overwriting if already defined
@@ -12,17 +12,26 @@ function defineGlobal(name: string, value: any) {
     value,
     configurable: false,
     enumerable: false,
-    writable: false
+    writable: false,
   });
 }
 
 // Models (User, Role, Permission, UserProfile)
-for (const key of ['User', 'Role', 'Permission', 'UserProfile']) {
+for (const key of ['User', 'Role', 'Permission', 'UserProfile', 'File']) {
   if ((Models as any)[key]) defineGlobal(key, (Models as any)[key]);
 }
 
 // Cache convenience functions + default manager instance
-for (const key of ['cacheGet', 'cacheSet', 'cacheDel', 'cacheHas', 'cacheClear', 'initCache', 'cacheKeys', 'generateCacheKey']) {
+for (const key of [
+  'cacheGet',
+  'cacheSet',
+  'cacheDel',
+  'cacheHas',
+  'cacheClear',
+  'initCache',
+  'cacheKeys',
+  'generateCacheKey',
+]) {
   if ((CacheFns as any)[key]) defineGlobal(key, (CacheFns as any)[key]);
 }
 // default cache manager (access as CacheManager or cacheManager)
@@ -37,10 +46,24 @@ for (const key of ['auth', 'authenticate', 'setUser', 'clearUser', 'parseRequest
 }
 
 // Optionally expose a registry for introspection
-defineGlobal('autoImported', Object.freeze({
-  models: ['User', 'Role', 'Permission', 'UserProfile'],
-  cache: ['cache', 'cacheManager', 'cacheGet', 'cacheSet', 'cacheDel', 'cacheHas', 'cacheClear', 'initCache', 'cacheKeys', 'generateCacheKey'],
-  auth: ['auth', 'authenticate', 'setUser', 'clearUser', 'parseRequest']
-}));
+defineGlobal(
+  'autoImported',
+  Object.freeze({
+    models: ['User', 'Role', 'Permission', 'UserProfile', 'File'],
+    cache: [
+      'cache',
+      'cacheManager',
+      'cacheGet',
+      'cacheSet',
+      'cacheDel',
+      'cacheHas',
+      'cacheClear',
+      'initCache',
+      'cacheKeys',
+      'generateCacheKey',
+    ],
+    auth: ['auth', 'authenticate', 'setUser', 'clearUser', 'parseRequest'],
+  }),
+);
 
 // No exports needed; side effects only.

@@ -1,10 +1,8 @@
 import path from 'path';
 // load env early
 import dotenv from 'dotenv';
-import User from "@/server/Models/User/User";
+import User from '@/app/Models/User/User';
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
-
-
 
 async function run() {
   try {
@@ -16,14 +14,16 @@ async function run() {
         name: 'Test User',
         email: 'test@example.com',
         active_status: 1,
-        avatar: 'avatar.png'
+        avatar: 'avatar.png',
       });
       // Relationship NOT loaded -> should include roles: []
       console.log('\nMock user (no relationships loaded):');
       console.log(JSON.stringify(mock.toJSON(), null, 2));
 
       // Simulate loaded roles by setting relation manually (example lightweight role object)
-      mock.setLoadedRelation('roles', [ { id: 99, name: 'Demo Role', slug: 'demo', description: null } ]);
+      mock.setLoadedRelation('roles', [
+        { id: 99, name: 'Demo Role', slug: 'demo', description: null },
+      ]);
       console.log('\nMock user (roles loaded):');
       console.log(JSON.stringify(mock.toJSON(), null, 2));
       return;

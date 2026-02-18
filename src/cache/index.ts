@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import CacheModel from '@/server/Models/Cache/Cache';
+import CacheModel from '@/app/Models/Cache/Cache';
 
 export interface CacheDriver {
   init(): Promise<void>;
@@ -35,7 +35,11 @@ if (APP_KEY) {
   try {
     ENCRYPTION_KEY = deriveKeyFromAppKey(APP_KEY);
     if (ENCRYPTION_KEY.length !== 32) {
-      console.warn('APP_KEY provided but did not yield 32 bytes; derived key length:', ENCRYPTION_KEY.length, '— disabling encryption');
+      console.warn(
+        'APP_KEY provided but did not yield 32 bytes; derived key length:',
+        ENCRYPTION_KEY.length,
+        '— disabling encryption',
+      );
       ENCRYPTION_ENABLED = false;
     } else {
       ENCRYPTION_ENABLED = true;
@@ -46,12 +50,17 @@ if (APP_KEY) {
   }
 } else {
   // not fatal — allow running without encryption but warn
-  console.warn('No APP_KEY set; cache encryption is disabled. Set APP_KEY in your .env to enable encryption of cached values.');
+  console.warn(
+    'No APP_KEY set; cache encryption is disabled. Set APP_KEY in your .env to enable encryption of cached values.',
+  );
 }
 
 function hmacFor(ivB64: string, valueB64: string) {
   if (!ENCRYPTION_KEY) return '';
-  return crypto.createHmac('sha256', ENCRYPTION_KEY).update(ivB64 + '|' + valueB64).digest('hex');
+  return crypto
+    .createHmac('sha256', ENCRYPTION_KEY)
+    .update(ivB64 + '|' + valueB64)
+    .digest('hex');
 }
 
 function encryptRaw(plain: string): string {
@@ -97,8 +106,12 @@ function stripPrefix(fullKey: string): string {
   if (!CACHE_PREFIX) return fullKey;
   return fullKey.startsWith(CACHE_PREFIX + ':') ? fullKey.slice(CACHE_PREFIX.length + 1) : fullKey;
 }
-export function generateCacheKey(...parts: Array<string | number | boolean | Date | null | undefined>): string {
-  const cleaned = parts.filter(p => p !== undefined && p !== null).map(p => p instanceof Date ? p.toISOString() : String(p).trim().replace(/\s+/g,'_'));
+export function generateCacheKey(
+  ...parts: Array<string | number | boolean | Date | null | undefined>
+): string {
+  const cleaned = parts
+    .filter((p) => p !== undefined && p !== null)
+    .map((p) => (p instanceof Date ? p.toISOString() : String(p).trim().replace(/\s+/g, '_')));
   return cleaned.join(':'); // unprefixed base key
 }
 
@@ -129,7 +142,9 @@ class FileCache implements CacheDriver {
       const raw = await fs.promises.readFile(p, 'utf8');
       const parsed = JSON.parse(raw);
       if (parsed.expiresAt && Date.now() > parsed.expiresAt) {
-        try { await fs.promises.unlink(p); } catch (e) {}
+        try {
+          await fs.promises.unlink(p);
+        } catch (e) {}
         return null;
       }
       const stored = parsed.value;
@@ -137,7 +152,11 @@ class FileCache implements CacheDriver {
       if (typeof stored === 'string') {
         const dec = decryptRaw(stored);
         if (dec !== null) {
-          try { return JSON.parse(dec); } catch (e) { return dec; }
+          try {
+            return JSON.parse(dec);
+          } catch (e) {
+            return dec;
+          }
         }
         // not encrypted or decryption not enabled: return parsed raw
         return stored;
@@ -152,7 +171,7 @@ class FileCache implements CacheDriver {
     await this.init();
     const p = this.filePath(key);
     const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : null;
-    const toStore = (typeof value === 'string') ? value : JSON.stringify(value);
+    const toStore = typeof value === 'string' ? value : JSON.stringify(value);
     const payloadVal = encryptRaw(toStore);
     const payload = { value: payloadVal, expiresAt };
     await fs.promises.writeFile(p, JSON.stringify(payload), 'utf8');
@@ -177,15 +196,15 @@ class FileCache implements CacheDriver {
   async clear() {
     await this.init();
     const files = await fs.promises.readdir(this.dir);
-    await Promise.all(files.map(f => fs.promises.unlink(path.join(this.dir, f)).catch(() => {})));
+    await Promise.all(files.map((f) => fs.promises.unlink(path.join(this.dir, f)).catch(() => {})));
   }
 
   async keys() {
     await this.init();
     const files = await fs.promises.readdir(this.dir);
     return files
-      .filter(f => f.endsWith('.json'))
-      .map(f => decodeURIComponent(f.replace(/\.json$/, '')))
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => decodeURIComponent(f.replace(/\.json$/, '')))
       .map(stripPrefix);
   }
 }
@@ -199,7 +218,9 @@ class DBCache implements CacheDriver {
     this.initialized = true;
   }
 
-  private now() { return Date.now(); }
+  private now() {
+    return Date.now();
+  }
 
   async get(key: string) {
     await this.init();
@@ -214,9 +235,17 @@ class DBCache implements CacheDriver {
     if (typeof rawVal === 'string') {
       const dec = decryptRaw(rawVal);
       if (dec !== null) {
-        try { return JSON.parse(dec); } catch { return dec; }
+        try {
+          return JSON.parse(dec);
+        } catch {
+          return dec;
+        }
       }
-      try { return JSON.parse(rawVal); } catch { return rawVal; }
+      try {
+        return JSON.parse(rawVal);
+      } catch {
+        return rawVal;
+      }
     }
     return rawVal;
   }
@@ -224,7 +253,7 @@ class DBCache implements CacheDriver {
   async set(key: string, value: any, ttlSeconds?: number | null) {
     await this.init();
     const expiresAt = ttlSeconds ? Date.now() + ttlSeconds * 1000 : null;
-    const raw = (typeof value === 'string') ? value : JSON.stringify(value);
+    const raw = typeof value === 'string' ? value : JSON.stringify(value);
     const stored = encryptRaw(raw);
     let record: any = await (CacheModel as any).where('k', prefixed(key)).first();
     if (record) {
@@ -234,7 +263,9 @@ class DBCache implements CacheDriver {
         record.setAttribute('expires_at', expiresAt);
         await record.save();
       } else {
-        record.v = stored; record.expires_at = expiresAt; await record.save();
+        record.v = stored;
+        record.expires_at = expiresAt;
+        await record.save();
       }
     } else {
       // create new
@@ -259,14 +290,16 @@ class DBCache implements CacheDriver {
     await this.init();
     const all: any[] = await (CacheModel as any).query().get();
     for (const rec of all) {
-      try { await rec.delete(true); } catch {}
+      try {
+        await rec.delete(true);
+      } catch {}
     }
   }
 
   async keys() {
     await this.init();
     const rows: any[] = await (CacheModel as any).query().get();
-    return rows.map(r => (r.getAttribute ? r.getAttribute('k') : r.k)).map(stripPrefix);
+    return rows.map((r) => (r.getAttribute ? r.getAttribute('k') : r.k)).map(stripPrefix);
   }
 }
 
@@ -282,7 +315,9 @@ class RedisCache implements CacheDriver {
       const redis = require('redis');
       createClient = redis.createClient;
     } catch (e) {
-      throw new Error('Redis driver selected (CACHE_DRIVER=redis) but "redis" package is not installed. Install it with `npm install redis`.');
+      throw new Error(
+        'Redis driver selected (CACHE_DRIVER=redis) but "redis" package is not installed. Install it with `npm install redis`.',
+      );
     }
 
     const redisUrl = process.env.REDIS_URL || undefined;
@@ -311,14 +346,22 @@ class RedisCache implements CacheDriver {
     if (res === null) return null;
     const dec = decryptRaw(res);
     if (dec !== null) {
-      try { return JSON.parse(dec); } catch (e) { return dec; }
+      try {
+        return JSON.parse(dec);
+      } catch (e) {
+        return dec;
+      }
     }
-    try { return JSON.parse(res); } catch (e) { return res; }
+    try {
+      return JSON.parse(res);
+    } catch (e) {
+      return res;
+    }
   }
 
   async set(key: string, value: any, ttlSeconds?: number | null) {
     await this.init();
-    const v = (typeof value === 'string') ? value : JSON.stringify(value);
+    const v = typeof value === 'string' ? value : JSON.stringify(value);
     const stored = encryptRaw(v);
     if (ttlSeconds && ttlSeconds > 0) {
       await this.client.set(prefixed(key), stored, { EX: ttlSeconds });
@@ -419,18 +462,60 @@ class CacheManager implements CacheDriver {
     return this.driver!.clear();
   }
 
-  async keys() { await this.ensureInit(); return this.driver!.keys(); }
+  async keys() {
+    await this.ensureInit();
+    return this.driver!.keys();
+  }
 }
 
 // Export a singleton instance
 const manager = new CacheManager();
 export default manager;
 
+// Cache facade for convenient access
+export const Cache = {
+    get: (k: string) => manager.get(k),
+    set: (k: string, v: any, ttlSeconds?: number | null) => manager.set(k, v, ttlSeconds),
+    del: (k: string) => manager.del(k),
+    has: (k: string) => manager.has(k),
+    clear: () => manager.clear(),
+    keys: () => manager.keys(),
+    forget: (k: string) => manager.del(k),
+    flush: () => manager.clear(),
+    remember: async <T>(key: string, ttlSeconds: number | null, callback: () => Promise<T>): Promise<T> => {
+        const cached = await manager.get(key);
+        if (cached !== null) return cached as T;
+        const value = await callback();
+        await manager.set(key, value, ttlSeconds);
+        return value;
+    },
+};
+
+// Get cache driver name
+export const getCacheDriverName = (): string => {
+    return (process.env.CACHE_DRIVER || 'file').toLowerCase();
+};
+
+// Get cache driver instance
+export const getCacheDriver = () => manager;
+
 // Convenience named exports
 export const initCache = async () => manager.init();
 export const cacheGet = async (k: string) => manager.get(k);
-export const cacheSet = async (k: string, v: any, ttlSeconds?: number | null) => manager.set(k, v, ttlSeconds);
+export const cacheSet = async (k: string, v: any, ttlSeconds?: number | null) =>
+  manager.set(k, v, ttlSeconds);
 export const cacheDel = async (k: string) => manager.del(k);
 export const cacheHas = async (k: string) => manager.has(k);
 export const cacheClear = async () => manager.clear();
 export const cacheKeys = async () => manager.keys();
+
+// Delete all cache keys that start with the provided (unprefixed) prefix.
+// Returns number of keys deleted.
+export const cacheDelPrefix = async (prefix: string): Promise<number> => {
+  // manager.keys() returns unprefixed keys (stripPrefix applied in drivers)
+  const keys = await manager.keys();
+  const matches = keys.filter((k) => k.startsWith(prefix));
+  await Promise.all(matches.map((k) => manager.del(k).catch(() => {})));
+  return matches.length;
+};
+

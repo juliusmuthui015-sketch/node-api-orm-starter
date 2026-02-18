@@ -10,7 +10,7 @@ async function run() {
   await cacheSet(key, { value: 123 }, 2);
   console.log('Has after set:', await cacheHas(key));
   console.log('Get after set:', await cacheGet(key));
-  await new Promise(r => setTimeout(r, 2500)); // wait for expiry
+  await new Promise((r) => setTimeout(r, 2500)); // wait for expiry
   console.log('Get after expiry (should be null):', await cacheGet(key));
   await cacheSet(key, 'raw-string', 10);
   console.log('Get raw string:', await cacheGet(key));
@@ -18,5 +18,7 @@ async function run() {
   console.log('Has after delete (should be false):', await cacheHas(key));
 }
 
-run().catch(e => { console.error(e); process.exit(1); });
-
+run().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

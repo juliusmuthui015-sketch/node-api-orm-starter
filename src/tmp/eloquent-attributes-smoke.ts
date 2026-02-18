@@ -3,10 +3,9 @@
 import path from 'path';
 import dotenv from 'dotenv';
 import { Model } from '@/eloquent/Model';
-import {initDatabase} from "@/config/db.config";
+import { initDatabase } from '@/config/db.config';
 
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
-
 
 class DemoPost extends Model {
   static table = 'posts';
@@ -39,7 +38,7 @@ class DemoUser extends Model {
   }
 
   // Keep accessors synchronous; avoid DB here to prevent Promise -> {}
-  async  getPostCountAttribute(_raw?: any) {
+  async getPostCountAttribute(_raw?: any) {
     return await this.posts().query().count();
   }
 
@@ -56,8 +55,9 @@ class DemoUser extends Model {
 }
 
 async function run() {
-  const skipDb = String(process.env.MOCK_DB || '0').toLowerCase() === '1' ||
-                 String(process.env.MOCK_DB || '1').toLowerCase() === 'true';
+  const skipDb =
+    String(process.env.MOCK_DB || '0').toLowerCase() === '1' ||
+    String(process.env.MOCK_DB || '1').toLowerCase() === 'true';
   if (!skipDb) {
     await initDatabase();
   }

@@ -1,14 +1,29 @@
 // Global declaration of auto-imported symbols provided by src/global/autoload.ts
 // Use helpers/models without manual imports.
 
-import type { User as UserClass } from '@/server/Models/User/User';
+import type { User as UserClass } from '@/app/Models/User/User';
 import type { Role as RoleClass } from '@/server/Models/User/Role';
 import type { Permission as PermissionClass } from '@/server/Models/User/Permission';
 import type { UserProfile as UserProfileClass } from '@/server/Models/User/UserProfile';
 
-import type { auth as authFn, authenticate as authenticateFn, setUser as setUserFn, clearUser as clearUserFn, parseRequest as parseRequestFn } from '@/server/helpers/auth';
+import type {
+  auth as authFn,
+  authenticate as authenticateFn,
+  setUser as setUserFn,
+  clearUser as clearUserFn,
+  parseRequest as parseRequestFn,
+} from '@/server/helpers/auth';
 
-import type { initCache as initCacheFn, cacheGet as cacheGetFn, cacheSet as cacheSetFn, cacheDel as cacheDelFn, cacheHas as cacheHasFn, cacheClear as cacheClearFn, cacheKeys as cacheKeysFn, generateCacheKey as generateCacheKeyFn } from '@/cache';
+import type {
+  initCache as initCacheFn,
+  cacheGet as cacheGetFn,
+  cacheSet as cacheSetFn,
+  cacheDel as cacheDelFn,
+  cacheHas as cacheHasFn,
+  cacheClear as cacheClearFn,
+  cacheKeys as cacheKeysFn,
+  generateCacheKey as generateCacheKeyFn,
+} from '@/cache';
 import type cacheManagerInstance from '@/cache';
 
 declare global {

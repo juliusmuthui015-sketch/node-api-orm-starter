@@ -8,6 +8,14 @@ export function registerMiddleware(name: string, entry: MiddlewareEntry) {
   registry[name] = entry;
 }
 
+export function getRegisteredMiddleware(): Record<string, MiddlewareEntry> {
+  return { ...registry };
+}
+
+export function hasMiddleware(name: string): boolean {
+  return name in registry;
+}
+
 export function resolveMiddleware(
   mw: string | RequestHandler | (RequestHandler | string)[],
 ): RequestHandler | RequestHandler[] {
@@ -20,11 +28,9 @@ export function resolveMiddleware(
     const args = rest ? rest.split(',').map((s) => s.trim()) : [];
     const factory = registry[key] as any;
     if (!factory) {
-      // Attempt to lazily load default providers (may not have been imported yet)
+      // Attempt to lazily load HTTP kernel middleware
       try {
-        // use require for synchronous load
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        require('@/server/Providers/providers');
+        require('@/app/Http/Middleware');
       } catch (e) {
         // ignore
       }
@@ -38,10 +44,9 @@ export function resolveMiddleware(
   const found = registry[mw as string];
   if (found) return found as RequestHandler;
 
-  // Try to require providers to register defaults and retry
+  // Try to require HTTP middleware module and retry
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    require('@/server/Providers/providers');
+    require('@/app/Http/Middleware');
   } catch (e) {
     // ignore
   }

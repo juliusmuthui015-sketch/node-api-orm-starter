@@ -2,6 +2,7 @@ import { Router, RequestHandler, Request, Response } from 'express';
 import { resolveMiddleware } from '@/eloquent/Middleware/middleware';
 import { Model } from '@/eloquent/Model';
 import { EloquentBuilder } from '@/eloquent/EloquentBuilder';
+import { container, Constructor } from '@/eloquent/Container/Container';
 
 // Type for controller method with model injection
 type ControllerMethod =
@@ -12,6 +13,8 @@ export type HandlerOrAlias =
   | RequestHandler
   | ControllerMethod
   | string
+  | { new (...args: any[]): any } // For Class-based controllers
+  | [ { new (...args: any[]): any }, string ] // For [ControllerClass, 'method']
   | Array<RequestHandler | ControllerMethod | string>;
 export type GroupOptions = {
   prefix?: string;
@@ -137,6 +140,7 @@ export class RouterBuilder {
   private nameStack: string[] = [''];
   private whereStack: RouteParameterConstraints[] = [{}];
   private namedRoutes: Map<string, NamedRoute> = new Map();
+  private registeredRoutes: Array<{ method: string; path: string; name: string | null; middleware: string[] }> = [];
   private currentRouteName: string = '';
   private explicitBinders: Map<string, (value: string, route: any) => Promise<any>> = new Map();
   private fallbackHandler: FallbackHandler | null = null;
@@ -337,7 +341,28 @@ export class RouterBuilder {
     const middlewares = this.currentMiddlewares();
     const resolvedHandlers: Array<RequestHandler | ControllerMethod> = [];
 
-    for (const h of handlers as any[]) {
+    for (let h of handlers as any[]) {
+      // Handle [ControllerClass, 'method'] or ControllerClass (if it has a handle method or similar)
+      if (Array.isArray(h) && h.length === 2 && typeof h[0] === 'function') {
+        const [ControllerClass, methodName] = h;
+        h = async (req: any, res: any, next: any, ...models: any[]) => {
+          const controllerInstance = container.make<any>(ControllerClass);
+          return controllerInstance[methodName](req, res, ...models);
+        };
+      } else if (typeof h === 'function' && h.prototype && !h.prototype.constructor.name.includes('anonymous')) {
+         // It's likely a class, we'll try to resolve it and call 'handle' or use it as is if it's already a handler
+         // Actually, usually in Laravel-style, if it's a class it might be a single-action controller (invokable)
+         const ControllerClass = h;
+         h = async (req: any, res: any, next: any, ...models: any[]) => {
+           const controllerInstance = container.make<any>(ControllerClass);
+           const method = controllerInstance.handle || controllerInstance.__invoke || controllerInstance;
+           if (typeof method === 'function') {
+             return method.call(controllerInstance, req, res, ...models);
+           }
+           return method;
+         };
+      }
+
       const r = resolveMiddleware(h as any);
       if (Array.isArray(r)) resolvedHandlers.push(...(r as any));
       else resolvedHandlers.push(r as any);
@@ -348,9 +373,15 @@ export class RouterBuilder {
 
     (this.router as any)[method](fullPath, ...middlewares, ...wrappedHandlers);
 
-    // Store named route
+    // Get middleware names for route listing
+    const middlewareNames = handlers
+      .filter(h => typeof h === 'string')
+      .map(h => String(h));
+
+    // Store route name if provided
+    let routeName: string | null = null;
     if (this.currentRouteName) {
-      const routeName = this.currentName()
+      routeName = this.currentName()
         ? `${this.currentName()}.${this.currentRouteName}`
         : this.currentRouteName;
       this.namedRoutes.set(routeName, {
@@ -360,6 +391,14 @@ export class RouterBuilder {
       });
       this.currentRouteName = '';
     }
+
+    // Store ALL routes for route:list command
+    this.registeredRoutes.push({
+      method: method.toUpperCase(),
+      path: fullPath,
+      name: routeName,
+      middleware: middlewareNames,
+    });
   }
 
   private wrapHandlersWithModelInjection(
@@ -715,8 +754,13 @@ export class RouterBuilder {
     return this;
   }
 
-  // Get all routes
-  getRoutes(): NamedRoute[] {
+  // Get all routes (including unnamed)
+  getRoutes(): Array<{ method: string; path: string; name: string | null; middleware: string[] }> {
+    return this.registeredRoutes;
+  }
+
+  // Get only named routes
+  getNamedRoutes(): NamedRoute[] {
     return Array.from(this.namedRoutes.values());
   }
 

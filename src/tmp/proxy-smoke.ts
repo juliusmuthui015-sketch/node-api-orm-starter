@@ -3,7 +3,7 @@ import { Model } from '@/eloquent/Model';
 class User extends Model {
   static table = 'users';
   static primaryKey = 'id';
-  static fillable = ['id','email','name'];
+  static fillable = ['id', 'email', 'name'];
 }
 
 (async () => {

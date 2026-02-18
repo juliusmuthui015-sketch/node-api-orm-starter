@@ -21,4 +21,7 @@ async function run() {
   console.log('Keys after clear:', await cacheKeys());
 }
 
-run().catch(e => { console.error(e); process.exit(1); });
+run().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
