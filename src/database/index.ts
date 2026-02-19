@@ -45,10 +45,14 @@ export async function runMigrations(options: MigrationOptions = {}): Promise<voi
 }
 
 // Export fresh migration function
-export async function migrateFresh(options: { seed?: boolean } = {}): Promise<void> {
+export async function migrateFresh(options: { seed?: boolean; force?: boolean; seederClass?: string } = {}): Promise<void> {
     const { run } = require('./migrate-fresh');
     if (run) {
-        await run(options);
+        await run({
+            seed: options.seed,
+            force: options.force,
+            seederClass: options.seederClass,
+        });
     }
 }
 
@@ -56,7 +60,10 @@ export async function migrateFresh(options: { seed?: boolean } = {}): Promise<vo
 export async function runSeeders(options: SeederOptions = {}): Promise<void> {
     const { run } = require('./run-seeders');
     if (run) {
-        await run(options);
+        await run({
+            class: options.class,
+            force: options.force,
+        });
     }
 }
 
