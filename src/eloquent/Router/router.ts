@@ -8,14 +8,21 @@ import { container, Constructor } from '@/eloquent/Container/Container';
 type ControllerMethod =
   | ((req: any, res: any, ...models: any[]) => any)
   | ((req: any, res: any, next: any, ...models: any[]) => any);
+type ControllerConstructor<T = any> = new (...args: any[]) => T;
+
+type ControllerMethodTuple<T extends ControllerConstructor> = [
+  T,
+  keyof InstanceType<T>
+];
+
 
 export type HandlerOrAlias =
-  | RequestHandler
-  | ControllerMethod
-  | string
-  | { new (...args: any[]): any } // For Class-based controllers
-  | [ { new (...args: any[]): any }, string ] // For [ControllerClass, 'method']
-  | Array<RequestHandler | ControllerMethod | string>;
+    | RequestHandler
+    | ControllerMethod
+    | string
+    | ControllerConstructor
+    | ControllerMethodTuple<ControllerConstructor>
+    | Array<RequestHandler | ControllerMethod | string>;
 export type GroupOptions = {
   prefix?: string;
   middleware?: RequestHandler | RequestHandler[] | string | string[];
@@ -347,6 +354,15 @@ export class RouterBuilder {
         const [ControllerClass, methodName] = h;
         h = async (req: any, res: any, next: any, ...models: any[]) => {
           const controllerInstance = container.make<any>(ControllerClass);
+          if (!controllerInstance[methodName]) {
+            const className = ControllerClass?.name ?? "UnknownController";
+
+            throw new Error(
+                `Route resolution failed: "${className}.${String(methodName)}()" does not exist. ` +
+                `Ensure the method is defined and publicly accessible on the controller.`
+            );
+          }
+
           return controllerInstance[methodName](req, res, ...models);
         };
       } else if (typeof h === 'function' && h.prototype && !h.prototype.constructor.name.includes('anonymous')) {
