@@ -1,14 +1,21 @@
 import readline from 'readline';
-import { initDatabase, query, getDbType, getMongoDb } from '@/config/db.config';
+import { initDatabase, query, getDbType, getMongoDb } from '@config/db.config';
 import path from 'path';
 
-function parseArgs(argv: string[]) {
-  const out: any = { force: false, seed: false, seederClass: undefined };
+interface MigrateFreshOptions {
+  force?: boolean;
+  seed?: boolean;
+  seederClass?: string;
+}
+
+function parseArgs(argv: string[]): MigrateFreshOptions {
+  const out: MigrateFreshOptions = { force: false, seed: false, seederClass: undefined };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--force') out.force = true;
-    else if (a === '--seed') out.seed = true;
+    if (a === '--force' || a === '-f') out.force = true;
+    else if (a === '--seed' || a === '-s') out.seed = true;
     else if (a.startsWith('--seeder=')) out.seederClass = a.split('=')[1];
+    else if (a.startsWith('--class=')) out.seederClass = a.split('=')[1];
   }
   return out;
 }
@@ -25,9 +32,12 @@ async function promptConfirm(question: string) {
   return /^y(es)?$/i.test(ans.trim());
 }
 
-async function run() {
+async function run(inputArgs?: MigrateFreshOptions) {
   await initDatabase();
-  const args = parseArgs(process.argv);
+
+  // Merge input args with parsed args from process.argv
+  const parsedArgs = parseArgs(process.argv);
+  const args: MigrateFreshOptions = inputArgs ? { ...parsedArgs, ...inputArgs } : parsedArgs;
 
   if (getDbType() === 'mongodb') {
     const db = getMongoDb();
@@ -182,4 +192,6 @@ if (require.main === module) {
   });
 }
 
-module.exports = run;
+// Export for programmatic use
+module.exports = { run };
+export { run };
