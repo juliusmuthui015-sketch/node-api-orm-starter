@@ -8,12 +8,21 @@ import {
   collection as mongoCollection,
 } from '@/config/db.config';
 
-function parseArgs(argv: string[]) {
-  const out: any = { runAll: true };
+export interface SeederOptions {
+  class?: string;
+  force?: boolean;
+}
+
+function parseArgs(argv: string[]): SeederOptions {
+  const out: SeederOptions = { class: undefined, force: false };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--class=')) out.class = a.split('=')[1];
-    else if (a === '--class') out.class = argv[i + 1];
+    else if (a === '--class' && argv[i + 1]) {
+      out.class = argv[i + 1];
+      i++; // skip next arg
+    }
+    else if (a === '--force' || a === '-f') out.force = true;
   }
   return out;
 }
@@ -54,16 +63,16 @@ async function loadAndRunSeeder(filePath: string) {
   return false;
 }
 
-async function run() {
-  await runWithOptions({});
-}
-
-async function runWithOptions(opts: { class?: string } = {}) {
+async function run(inputOptions?: SeederOptions) {
   await initDatabase();
-  const args = parseArgs(process.argv);
-  // merge options: explicit opts.class overrides CLI --class
-  const seederClass = opts.class || (args.class as string | undefined) || undefined;
+
+  // Merge input options with parsed args from process.argv
+  const parsedArgs = parseArgs(process.argv);
+  const opts: SeederOptions = inputOptions ? { ...parsedArgs, ...inputOptions } : parsedArgs;
+
+  const seederClass = opts.class;
   const dir = path.resolve(__dirname, './seeders');
+
   if (!fs.existsSync(dir)) {
     console.warn('No seeders directory found:', dir);
     return;
@@ -73,6 +82,7 @@ async function runWithOptions(opts: { class?: string } = {}) {
     .readdirSync(dir)
     .filter((f) => f.endsWith('.ts') || f.endsWith('.js'))
     .sort();
+
   // if class specified, try to find matching file by base name
   if (seederClass) {
     const targetBase = seederClass.replace(/Seeder$/i, '');
@@ -84,6 +94,7 @@ async function runWithOptions(opts: { class?: string } = {}) {
     if (!match) throw new Error(`Seeder class ${seederClass} not found in ${dir}`);
     const full = path.join(dir, match);
     if (full.endsWith('.ts')) require('ts-node/register/transpile-only');
+    console.log(`Running seeder: ${match}`);
     const ok = await loadAndRunSeeder(full);
     if (!ok) console.warn('Seeder did not export a callable function:', full);
     return;
@@ -96,11 +107,13 @@ async function runWithOptions(opts: { class?: string } = {}) {
   if (dbSeederFile) {
     const full = path.join(dir, dbSeederFile);
     if (full.endsWith('.ts')) require('ts-node/register/transpile-only');
+    console.log('Running DatabaseSeeder...');
     await loadAndRunSeeder(full);
     return;
   }
 
   // Otherwise run all seeders in order
+  console.log(`Running all ${files.length} seeders...`);
   for (const f of files) {
     const full = path.join(dir, f);
     if (full.endsWith('.ts')) require('ts-node/register/transpile-only');
@@ -113,11 +126,13 @@ async function runWithOptions(opts: { class?: string } = {}) {
       throw e;
     }
   }
+
+  console.log('All seeders completed successfully.');
 }
 
-// expose run() and runWithOptions() for programmatic use and only execute when invoked directly
+// expose run() for programmatic use and only execute when invoked directly
 module.exports.run = run;
-module.exports.runWithOptions = runWithOptions;
+export { run };
 
 if (require.main === module) {
   run().catch((err) => {
