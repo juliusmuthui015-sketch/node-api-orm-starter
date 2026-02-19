@@ -241,13 +241,25 @@ async function runSql(sql: string) {
   await query(sql);
 }
 
-async function run() {
+async function run(inputArgs?: {
+  command?: 'up' | 'down';
+  step?: number;
+  force?: boolean;
+  forceConfirm?: boolean;
+  lockName?: string;
+  lockTimeout?: number;
+  lockRetries?: number;
+  lockBackoffMs?: number;
+}) {
   await initDatabase();
 
   // Ensure migrations tables/collections exist BEFORE attempting to acquire a lock.
   await ensureMigrationsTable();
 
-  const args = parseArgs(process.argv);
+  // Use input args if provided, otherwise parse from process.argv
+  // Merge inputArgs with defaults from parseArgs to ensure all fields are present
+  const parsedFromArgv = parseArgs(process.argv);
+  const args = inputArgs ? { ...parsedFromArgv, ...inputArgs } : parsedFromArgv;
 
   // checksum policy comes from env var MIGRATION_CHECKSUM_POLICY (strict|warn|ignore)
   const checksumPolicy = (process.env.MIGRATION_CHECKSUM_POLICY || 'strict').toLowerCase();
@@ -539,7 +551,6 @@ async function run() {
 
 // expose run for programmatic use and only auto-run when executed directly
 module.exports.run = run;
-
 if (require.main === module) {
   run().catch((err) => {
     console.error(err);
