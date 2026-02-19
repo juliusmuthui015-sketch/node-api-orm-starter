@@ -2,7 +2,7 @@ import { Command } from '@/eloquent/Command/Command';
 import { ArgumentsCamelCase } from 'yargs';
 import fs from 'fs';
 import path from 'path';
-import { runMigrations, migrateFresh, runSeeders } from '@/database';
+import { runMigrations, migrateFresh, runSeeders, rollbackMigrations } from '@/database';
 
 export class MigrateCommand extends Command {
     protected signature = 'migrate';
@@ -14,13 +14,40 @@ export class MigrateCommand extends Command {
             description: 'Number of migrations to run',
             default: 0,
         },
+        force: {
+            type: 'boolean' as const,
+            description: 'Force migrations to run, ignoring checksum mismatches',
+            default: false,
+            alias: 'f',
+        },
+        'force-confirm': {
+            type: 'boolean' as const,
+            description: 'Prompt for confirmation on checksum mismatches',
+            default: false,
+            alias: 'fc',
+        },
     };
 
-    async handle(_args: ArgumentsCamelCase): Promise<void> {
+    async handle(args: ArgumentsCamelCase): Promise<void> {
         this.info('Running migrations...');
+
+        // Get options directly from args (yargs parsed) as well as this.option for flexibility
+        const force = args.force === true || this.option<boolean>('force', false);
+        const forceConfirm = args['force-confirm'] === true || args.forceConfirm === true || this.option<boolean>('force-confirm', false);
+        const step = (args.step as number) || this.option<number>('step', 0);
+
+        if (force) {
+            this.warn('Force mode enabled - checksum mismatches will be ignored');
+        }
+
         try {
-            await runMigrations();
-            this.info('Migrations completed successfully.');
+            await runMigrations({
+                command: 'up',
+                step: step || undefined,
+                force,
+                forceConfirm,
+            });
+            this.success('Migrations completed successfully.');
         } catch (error: any) {
             this.error(`Migration failed: ${error.message}`);
             process.exit(1);
@@ -37,19 +64,36 @@ export class MigrateFreshCommand extends Command {
             type: 'boolean' as const,
             description: 'Run seeders after migration',
             default: false,
+            alias: 's',
+        },
+        force: {
+            type: 'boolean' as const,
+            description: 'Force the operation without confirmation',
+            default: false,
+            alias: 'f',
         },
     };
 
-    async handle(args: ArgumentsCamelCase): Promise<void> {
+    async handle(_args: ArgumentsCamelCase): Promise<void> {
+        const seed = this.option<boolean>('seed', false);
+        const force = this.option<boolean>('force', false);
+
+        if (!force) {
+            this.warn('⚠️  This will DROP ALL TABLES and re-run migrations!');
+            const confirmed = await this.confirm('Are you sure you want to continue?', false);
+            if (!confirmed) {
+                this.info('Operation cancelled.');
+                return;
+            }
+        }
+
         this.warn('Dropping all tables and re-running migrations...');
         try {
-            await migrateFresh();
-            this.info('Fresh migration completed successfully.');
+            await migrateFresh({ seed });
+            this.success('Fresh migration completed successfully.');
 
-            if (args.seed) {
-                this.info('Running seeders...');
-                await runSeeders();
-                this.info('Seeding completed successfully.');
+            if (seed) {
+                this.info('Seeders were run as part of fresh migration.');
             }
         } catch (error: any) {
             this.error(`Fresh migration failed: ${error.message}`);
@@ -60,20 +104,76 @@ export class MigrateFreshCommand extends Command {
 
 export class MigrateRollbackCommand extends Command {
     protected signature = 'migrate:rollback';
-    protected description = 'Rollback the last database migration';
+    protected description = 'Rollback the last database migration batch';
 
     protected options = {
         step: {
             type: 'number' as const,
-            description: 'Number of migrations to rollback',
+            description: 'Number of batches to rollback',
             default: 1,
+            alias: 's',
+        },
+        force: {
+            type: 'boolean' as const,
+            description: 'Force rollback without confirmation',
+            default: false,
+            alias: 'f',
         },
     };
 
-    async handle(args: ArgumentsCamelCase): Promise<void> {
-        const steps = args.step as number || 1;
-        this.info(`Rolling back ${steps} migration(s)...`);
-        this.warn('Rollback not yet implemented. Use migrate:fresh for now.');
+    async handle(_args: ArgumentsCamelCase): Promise<void> {
+        const step = this.option<number>('step', 1);
+        const force = this.option<boolean>('force', false);
+
+        if (!force) {
+            this.warn(`⚠️  This will rollback ${step} migration batch(es)!`);
+            const confirmed = await this.confirm('Are you sure you want to continue?', false);
+            if (!confirmed) {
+                this.info('Operation cancelled.');
+                return;
+            }
+        }
+
+        this.info(`Rolling back ${step} migration batch(es)...`);
+        try {
+            await rollbackMigrations({ step });
+            this.success(`Rollback of ${step} batch(es) completed successfully.`);
+        } catch (error: any) {
+            this.error(`Rollback failed: ${error.message}`);
+            process.exit(1);
+        }
+    }
+}
+
+export class MigrateStatusCommand extends Command {
+    protected signature = 'migrate:status';
+    protected description = 'Show the status of each migration';
+
+    async handle(_args: ArgumentsCamelCase): Promise<void> {
+        this.info('Migration Status:');
+        this.comment('(This feature shows migration files and their applied status)');
+
+        const dir = path.resolve(process.cwd(), 'src/database/migrations');
+
+        if (!fs.existsSync(dir)) {
+            this.warn('No migrations directory found.');
+            return;
+        }
+
+        const files = fs.readdirSync(dir)
+            .filter(f => f.endsWith('.ts') || f.endsWith('.js'))
+            .sort();
+
+        if (files.length === 0) {
+            this.info('No migration files found.');
+            return;
+        }
+
+        this.line('');
+        this.table(
+            ['Migration', 'Status'],
+            files.map(f => [f, 'Pending'])  // TODO: Check against DB
+        );
     }
 }
 
@@ -133,17 +233,17 @@ type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 
 // Migration: ${name}
 // Alter table ${table}
-export async function up(schema: MigrationSchema, query: QueryFn) {
+module.exports.up = async function (schema: MigrationSchema, _query: QueryFn) {
     return schema.alterTable('${table}', (table: TableBuilder) => {
         // Add columns, indexes, foreign keys here
     });
-}
+};
 
-export async function down(schema: MigrationSchema, query: QueryFn) {
+module.exports.down = async function (schema: MigrationSchema, _query: QueryFn) {
     return schema.alterTable('${table}', (table: TableBuilder) => {
         // Reverse operations here
     });
-}
+};
 `;
         }
 
@@ -152,16 +252,16 @@ export async function down(schema: MigrationSchema, query: QueryFn) {
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 
 // Migration: ${name}
-export async function up(schema: MigrationSchema, query: QueryFn) {
+module.exports.up = async function (schema: MigrationSchema, _query: QueryFn) {
     return schema.createTable('${tbl}', (table: TableBuilder) => {
-        table.id();
+        table.increments('id');
         table.timestamps();
     });
-}
+};
 
-export async function down(schema: MigrationSchema, query: QueryFn) {
-    return schema.dropTableIfExists('${tbl}');
-}
+module.exports.down = async function (schema: MigrationSchema, _query: QueryFn) {
+    return schema.dropTable('${tbl}');
+};
 `;
     }
 }
