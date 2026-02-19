@@ -72,11 +72,17 @@ export class MigrateFreshCommand extends Command {
             default: false,
             alias: 'f',
         },
+        'seeder-class': {
+            type: 'string' as const,
+            description: 'Specific seeder class to run',
+            alias: 'c',
+        },
     };
 
-    async handle(_args: ArgumentsCamelCase): Promise<void> {
-        const seed = this.option<boolean>('seed', false);
-        const force = this.option<boolean>('force', false);
+    async handle(args: ArgumentsCamelCase): Promise<void> {
+        const seed = args.seed === true || this.option<boolean>('seed', false);
+        const force = args.force === true || this.option<boolean>('force', false);
+        const seederClass = (args['seeder-class'] || args.seederClass) as string | undefined;
 
         if (!force) {
             this.warn('⚠️  This will DROP ALL TABLES and re-run migrations!');
@@ -89,7 +95,7 @@ export class MigrateFreshCommand extends Command {
 
         this.warn('Dropping all tables and re-running migrations...');
         try {
-            await migrateFresh({ seed });
+            await migrateFresh({ seed, force: true, seederClass }); // Pass force: true since we already confirmed
             this.success('Fresh migration completed successfully.');
 
             if (seed) {
