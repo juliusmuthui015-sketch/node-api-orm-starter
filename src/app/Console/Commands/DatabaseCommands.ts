@@ -20,9 +20,10 @@ export class DbSeedCommand extends Command {
         },
     };
 
-    async handle(_args: ArgumentsCamelCase): Promise<void> {
-        const seederClass = this.option<string>('class');
-        const force = this.option<boolean>('force', false);
+    async handle(args: ArgumentsCamelCase): Promise<void> {
+        // Get options from both args and this.option for flexibility
+        const seederClass = (args.class as string) || this.option<string>('class');
+        const force = args.force === true || this.option<boolean>('force', false);
 
         if (process.env.NODE_ENV === 'production' && !force) {
             this.error('Cannot run seeders in production without --force flag');
