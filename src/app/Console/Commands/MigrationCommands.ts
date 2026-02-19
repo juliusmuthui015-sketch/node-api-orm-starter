@@ -151,7 +151,6 @@ export class MigrateStatusCommand extends Command {
 
     async handle(_args: ArgumentsCamelCase): Promise<void> {
         this.info('Migration Status:');
-        this.comment('(This feature shows migration files and their applied status)');
 
         const dir = path.resolve(process.cwd(), 'src/database/migrations');
 
@@ -169,11 +168,54 @@ export class MigrateStatusCommand extends Command {
             return;
         }
 
+        // Get applied migrations from database (supports both MySQL and MongoDB)
+        let appliedMigrations: Map<string, { batch: number }> = new Map();
+        try {
+            const { query, initDatabase, getDbType, getMongoDb } = require('@/config/db.config');
+            await initDatabase();
+
+            const dbType = getDbType();
+
+            if (dbType === 'mongodb') {
+                // MongoDB: Query the migrations collection
+                const db = getMongoDb();
+                const rows = await db
+                    .collection('migrations')
+                    .find({}, { projection: { _id: 0, name: 1, batch: 1 } })
+                    .sort({ migrated_at: 1 })
+                    .toArray();
+                for (const r of rows) {
+                    appliedMigrations.set(r.name, { batch: r.batch });
+                }
+            } else {
+                // MySQL/SQL: Query the migrations table
+                const rows: any[] = await query('SELECT name, batch FROM migrations ORDER BY id');
+                for (const r of rows) {
+                    appliedMigrations.set(r.name, { batch: r.batch });
+                }
+            }
+        } catch (e: any) {
+            this.warn(`Could not fetch migration status from DB: ${e.message}`);
+        }
+
         this.line('');
-        this.table(
-            ['Migration', 'Status'],
-            files.map(f => [f, 'Pending'])  // TODO: Check against DB
-        );
+
+        const rows = files.map(f => {
+            const migration = appliedMigrations.get(f);
+            const isApplied = !!migration;
+            const status = isApplied
+                ? `\x1b[32mRan\x1b[0m (batch ${migration!.batch})`
+                : '\x1b[33mPending\x1b[0m';
+            return [f, status];
+        });
+
+        const ran = files.filter(f => appliedMigrations.has(f)).length;
+        const pending = files.length - ran;
+
+        this.table(['Migration', 'Status'], rows);
+
+        this.line('');
+        this.info(`Total: ${files.length} migrations (${ran} ran, ${pending} pending)`);
     }
 }
 
