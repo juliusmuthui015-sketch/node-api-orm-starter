@@ -28,6 +28,9 @@ import { initCache } from '@/cache';
 import { initDatabase } from '@/config/db.config';
 import { Kernel } from '@/eloquent/Command/Kernel/Kernel';
 
+// Import jobs to trigger auto-registration via @Queueable decorator
+import '@/app/Jobs';
+
 /*
 |--------------------------------------------------------------------------
 | Initialize Application

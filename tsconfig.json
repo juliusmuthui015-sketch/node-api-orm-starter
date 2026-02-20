@@ -13,9 +13,15 @@
     "skipLibCheck": true,
     "baseUrl": "./src",
     "paths": {
-      "@/*": ["*"]
+      "@/*": ["*"],
+      "@app/*": ["app/*"],
+      "@config/*": ["config/*"],
+      "@database/*": ["database/*"],
+      "@routes/*": ["routes/*"],
+      "@bootstrap/*": ["bootstrap/*"]
     },
     "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
     "useDefineForClassFields": false
   },
   "include": ["src"],

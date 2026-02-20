@@ -1,7 +1,8 @@
 import { ServiceProvider, ServiceProviderClass } from '@/eloquent/Providers/ServiceProvider';
-import { DatabaseServiceProvider } from '@/app/Providers/DatabaseServiceProvider';
-import { CacheServiceProvider } from '@/app/Providers/CacheServiceProvider';
-import { RouteServiceProvider } from '@/app';
+import {RouteServiceProvider} from "@/app";
+import {DatabaseServiceProvider} from "@/app/Providers/DatabaseServiceProvider";
+import {CacheServiceProvider} from "@/app/Providers/CacheServiceProvider";
+import {QueueServiceProvider} from "@/app/Providers/QueueServiceProvider";
 
 export class AppServiceProvider extends ServiceProvider {
     /*
@@ -17,7 +18,7 @@ export class AppServiceProvider extends ServiceProvider {
         DatabaseServiceProvider,
         CacheServiceProvider,
         RouteServiceProvider,
-        // Add your custom providers here:
+        QueueServiceProvider,
         // Example: BillingServiceProvider,
         // Example: NotificationServiceProvider,
     ];
@@ -31,9 +32,6 @@ export class AppServiceProvider extends ServiceProvider {
         // Register additional providers
         this.registerProviders(this.additionalProviders);
 
-        // Register your singleton services here:
-        // Example: this.container.singleton(MyService);
-        // Example: this.container.alias(MyService, 'my-service');
     }
 
     /*
@@ -50,10 +48,6 @@ export class AppServiceProvider extends ServiceProvider {
     |--------------------------------------------------------------------------
     | Register Model Observers
     |--------------------------------------------------------------------------
-    |
-    | Register observers for your models here. Observers allow you to
-    | listen for model events like created, updated, deleted, etc.
-    |
     */
     protected registerObservers(): void {
         // Example: Register an observer for the User model

@@ -2,8 +2,14 @@ import { Argv } from 'yargs';
 import { Command } from '@/eloquent/Command/Command';
 
 // Import all commands from the index
-import * as Commands from '@/app/Console/Commands';
+import * as Commands from '@app/Console/Commands';
 import path from "path";
+import { scheduler, Schedule } from '@/eloquent/Queue';
+
+// Import QueueServiceProvider to register scheduled tasks
+import { QueueServiceProvider } from '@/app/Providers/QueueServiceProvider';
+import { container } from '@/eloquent/Container/Container';
+import { Application } from '@/app/Providers/Application';
 
 export class Kernel {
     /*
@@ -23,6 +29,13 @@ export class Kernel {
     |--------------------------------------------------------------------------
     */
     protected commandsPath: string = path.resolve(__dirname, 'Commands');
+
+    /*
+    |--------------------------------------------------------------------------
+    | Scheduler Instance
+    |--------------------------------------------------------------------------
+    */
+    protected scheduler: Schedule = scheduler;
 
     /*
     |--------------------------------------------------------------------------
@@ -91,11 +104,18 @@ export class Kernel {
     |--------------------------------------------------------------------------
     |
     | Define the application's command schedule.
+    | Override this method in your app's Kernel to define scheduled tasks.
+    |
+    | Examples:
+    |   this.scheduler.command('cache:clear').daily();
+    |   this.scheduler.command('invoice:mark-overdue').dailyAt('00:00');
+    |   this.scheduler.call(async () => { ... }).everyFiveMinutes();
     |
     */
     protected schedule(): void {
         // Define scheduled commands here
-        // e.g., this.command('cache:clear').daily();
+        // Example: this.scheduler.command('cache:clear').daily();
+        // Example: this.scheduler.command('invoice:mark-overdue').dailyAt('00:00');
     }
 
     /*
@@ -104,6 +124,25 @@ export class Kernel {
     |--------------------------------------------------------------------------
     */
     boot(): void {
+        // Initialize QueueServiceProvider to register scheduled tasks
+        try {
+            const app = new Application(container);
+            const queueProvider = new QueueServiceProvider(app);
+            queueProvider.register();
+            queueProvider.boot();
+        } catch (e) {
+            // QueueServiceProvider boot failed, continue anyway
+        }
+
         this.schedule();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Get Scheduler
+    |--------------------------------------------------------------------------
+    */
+    getScheduler(): Schedule {
+        return this.scheduler;
     }
 }
