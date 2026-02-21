@@ -5,3 +5,4 @@ export { RouteServiceProvider } from './RouteServiceProvider';
 export { DatabaseServiceProvider } from './DatabaseServiceProvider';
 export { CacheServiceProvider } from './CacheServiceProvider';
 export { QueueServiceProvider } from './QueueServiceProvider';
+export { EventServiceProvider} from './EventServiceProvider';

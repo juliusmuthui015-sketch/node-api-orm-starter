@@ -1,8 +1,12 @@
 import { Argv } from 'yargs';
 import { Command } from '@/eloquent/Command/Command';
 
-// Import all commands from the index
-import * as Commands from '@app/Console/Commands';
+// Import system/framework commands from eloquent
+import * as SystemCommands from '../Commands';
+
+// Import application-specific commands
+import * as AppCommands from '@app/Console/Commands';
+
 import path from "path";
 import { scheduler, Schedule } from '@/eloquent/Queue';
 
@@ -42,14 +46,17 @@ export class Kernel {
     | Get All Command Instances
     |--------------------------------------------------------------------------
     |
-    | Auto-scans the Commands directory and returns all command instances.
+    | Returns all command instances from:
+    | 1. System commands (eloquent/Command/Commands)
+    | 2. Application commands (app/Console/Commands)
+    | 3. Manually registered commands
     |
     */
     getCommands(): Command[] {
         const commandInstances: Command[] = [];
 
-        // Get commands from the imported Commands module
-        for (const [name, CommandClass] of Object.entries(Commands)) {
+        // 1. Get system/framework commands from eloquent
+        for (const [name, CommandClass] of Object.entries(SystemCommands)) {
             if (
                 typeof CommandClass === 'function' &&
                 CommandClass.prototype instanceof Command
@@ -63,7 +70,22 @@ export class Kernel {
             }
         }
 
-        // Add manually registered commands
+        // 2. Get application-specific commands
+        for (const [name, CommandClass] of Object.entries(AppCommands)) {
+            if (
+                typeof CommandClass === 'function' &&
+                CommandClass.prototype instanceof Command
+            ) {
+                try {
+                    const instance = new (CommandClass as new () => Command)();
+                    commandInstances.push(instance);
+                } catch (e) {
+                    // Skip if instantiation fails
+                }
+            }
+        }
+
+        // 3. Add manually registered commands
         for (const CommandClass of this.commands) {
             try {
                 const instance = new CommandClass();
