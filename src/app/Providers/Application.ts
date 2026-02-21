@@ -3,6 +3,7 @@ import cors from 'cors';
 import { Container } from '@/eloquent/Container/Container';
 import { ServiceProvider, ServiceProviderClass } from '@/eloquent/Providers/ServiceProvider';
 import { query as dbQuery } from '@/config/db.config';
+import { EventFacadeClass, FakeEventDispatcher, DispatchedEvent } from '@/eloquent/Core/Events';
 
 export class Application {
     private providers: ServiceProvider[] = [];
@@ -244,5 +245,65 @@ export class Application {
 
     async query(sql: string, params?: any[]): Promise<any> {
         return dbQuery(sql, params);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Event Testing Helpers
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Fake events for testing and execute a callback.
+     * Events dispatched within the callback will be captured instead of executed.
+     *
+     * @example
+     * const events = await app.withEvents(async () => {
+     *     await userService.register(data);
+     * });
+     * expect(events.some(e => e.eventName === 'user.registered')).toBe(true);
+     */
+    async withEvents<T>(
+        callback: () => T | Promise<T>,
+        eventsToFake?: string[]
+    ): Promise<{ result: T; events: DispatchedEvent[] }> {
+        const fakeDispatcher = EventFacadeClass.fake(eventsToFake);
+
+        try {
+            const result = await callback();
+            const events = fakeDispatcher.getDispatchedEvents();
+            return { result, events };
+        } finally {
+            EventFacadeClass.restore();
+        }
+    }
+
+    /**
+     * Fake all events for testing.
+     * Use Event.assertDispatched() and Event.assertNotDispatched() for assertions.
+     *
+     * @example
+     * app.fakeEvents();
+     * await userService.register(data);
+     * Event.assertDispatched('user.registered');
+     * Event.assertNotDispatched('user.deleted');
+     * app.restoreEvents();
+     */
+    fakeEvents(events?: string[]): FakeEventDispatcher {
+        return EventFacadeClass.fake(events);
+    }
+
+    /**
+     * Restore the original event dispatcher after faking.
+     */
+    restoreEvents(): void {
+        EventFacadeClass.restore();
+    }
+
+    /**
+     * Get the Event facade for direct access.
+     */
+    get events(): typeof EventFacadeClass {
+        return EventFacadeClass;
     }
 }

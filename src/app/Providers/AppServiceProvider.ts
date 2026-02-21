@@ -1,8 +1,11 @@
 import { ServiceProvider, ServiceProviderClass } from '@/eloquent/Providers/ServiceProvider';
+import User from '@/app/Models/User/User';
+import { Model } from '@/eloquent/Model';
+import {DatabaseServiceProvider} from "@app/Providers/DatabaseServiceProvider";
+import {CacheServiceProvider} from "@app/Providers/CacheServiceProvider";
 import {RouteServiceProvider} from "@/app";
-import {DatabaseServiceProvider} from "@/app/Providers/DatabaseServiceProvider";
-import {CacheServiceProvider} from "@/app/Providers/CacheServiceProvider";
-import {QueueServiceProvider} from "@/app/Providers/QueueServiceProvider";
+import {QueueServiceProvider} from "@app/Providers/QueueServiceProvider";
+import {EventServiceProvider} from "@app/Providers/EventServiceProvider";
 
 export class AppServiceProvider extends ServiceProvider {
     /*
@@ -19,6 +22,7 @@ export class AppServiceProvider extends ServiceProvider {
         CacheServiceProvider,
         RouteServiceProvider,
         QueueServiceProvider,
+        EventServiceProvider,
         // Example: BillingServiceProvider,
         // Example: NotificationServiceProvider,
     ];
@@ -31,7 +35,6 @@ export class AppServiceProvider extends ServiceProvider {
     register(): void {
         // Register additional providers
         this.registerProviders(this.additionalProviders);
-
     }
 
     /*
