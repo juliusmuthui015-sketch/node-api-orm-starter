@@ -54,5 +54,9 @@ export {
 export {
     CallQueuedListener,
     CallQueuedEvent,
+    registerQueuedListener,
+    getQueuedListener,
+    hasQueuedListener,
+    getRegisteredListenerNames,
 } from './QueuedEventJobs';
 
