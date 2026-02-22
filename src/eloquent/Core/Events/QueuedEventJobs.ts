@@ -11,39 +11,72 @@
 
 import { Job, Queueable } from '@/eloquent/Queue';
 
+/*
+|--------------------------------------------------------------------------
+| Listener Registry
+|--------------------------------------------------------------------------
+|
+| A registry to store listener classes by name for queue deserialization.
+| Listeners must be registered here to be callable from the queue.
+|
+*/
+
+const listenerRegistry: Map<string, new () => any> = new Map();
+
+/**
+ * Register a listener class for queue execution.
+ */
+export function registerQueuedListener(name: string, listenerClass: new () => any): void {
+    listenerRegistry.set(name, listenerClass);
+}
+
+/**
+ * Get a registered listener class by name.
+ */
+export function getQueuedListener(name: string): (new () => any) | undefined {
+    return listenerRegistry.get(name);
+}
+
+/**
+ * Check if a listener is registered.
+ */
+export function hasQueuedListener(name: string): boolean {
+    return listenerRegistry.has(name);
+}
+
+/**
+ * Get all registered listener names.
+ */
+export function getRegisteredListenerNames(): string[] {
+    return Array.from(listenerRegistry.keys());
+}
+
 @Queueable('CallQueuedListener')
 export class CallQueuedListener extends Job {
     /**
      * The listener class name.
      */
-    public listenerClass: string;
+    public listenerClass: string = '';
 
     /**
      * The event name.
      */
-    public eventName: string;
+    public eventName: string = '';
 
     /**
      * The event payload.
      */
-    public payload: any;
-
-    /**
-     * The module path to the listener.
-     */
-    public listenerPath: string;
+    public payload: any = null;
 
     constructor(
-        listenerClass: string,
-        eventName: string,
-        payload: any,
-        listenerPath: string
+        listenerClass?: string,
+        eventName?: string,
+        payload?: any
     ) {
         super();
-        this.listenerClass = listenerClass;
-        this.eventName = eventName;
-        this.payload = payload;
-        this.listenerPath = listenerPath;
+        if (listenerClass) this.listenerClass = listenerClass;
+        if (eventName) this.eventName = eventName;
+        if (payload !== undefined) this.payload = payload;
     }
 
     /**
@@ -51,26 +84,65 @@ export class CallQueuedListener extends Job {
      */
     async handle(): Promise<void> {
         try {
-            // Dynamically import the listener module
-            const module = await import(this.listenerPath);
-            const ListenerClass = module[this.listenerClass];
+            // Get the listener from the registry
+            let ListenerClass = getQueuedListener(this.listenerClass);
 
             if (!ListenerClass) {
-                throw new Error(`Listener class [${this.listenerClass}] not found in [${this.listenerPath}]`);
+                // Try to auto-discover by importing app listeners
+                await this.discoverListeners();
+                ListenerClass = getQueuedListener(this.listenerClass);
+
+                if (!ListenerClass) {
+                    throw new Error(
+                        `Listener class [${this.listenerClass}] not found in registry. ` +
+                        `Make sure it's exported from @/app/Listeners and uses @ShouldQueue decorator.`
+                    );
+                }
             }
 
-            const listener = new ListenerClass();
-
-            if (typeof listener.handle !== 'function') {
-                throw new Error(`Listener [${this.listenerClass}] does not have a handle method`);
-            }
-
-            await listener.handle(this.payload);
-
-            console.log(`[CallQueuedListener] Successfully executed ${this.listenerClass} for event ${this.eventName}`);
+            await this.executeListener(ListenerClass);
         } catch (error) {
             console.error(`[CallQueuedListener] Failed to execute ${this.listenerClass}:`, error);
             throw error;
+        }
+    }
+
+    /**
+     * Execute a listener class with the payload.
+     */
+    private async executeListener(ListenerClass: new () => any): Promise<void> {
+        const listener = new ListenerClass();
+
+        if (typeof listener.handle !== 'function') {
+            throw new Error(`Listener [${this.listenerClass}] does not have a handle method`);
+        }
+
+        // Check shouldHandle if it exists
+        if (typeof listener.shouldHandle === 'function' && !listener.shouldHandle(this.payload)) {
+            console.log(`[CallQueuedListener] Listener ${this.listenerClass} skipped (shouldHandle returned false)`);
+            return;
+        }
+
+        await listener.handle(this.payload);
+        console.log(`[CallQueuedListener] Successfully executed ${this.listenerClass} for event ${this.eventName}`);
+    }
+
+    /**
+     * Try to discover listeners by importing the app listeners module.
+     */
+    private async discoverListeners(): Promise<void> {
+        try {
+            // Import all listeners - this will trigger decorator registration
+            const listeners = await require('@/app/Listeners');
+
+            // Register all exported listener classes
+            for (const [name, ExportedClass] of Object.entries(listeners)) {
+                if (typeof ExportedClass === 'function' && name !== 'Listener') {
+                    registerQueuedListener(name, ExportedClass as new () => any);
+                }
+            }
+        } catch (error) {
+            console.warn('[CallQueuedListener] Failed to auto-discover listeners:', error);
         }
     }
 
@@ -114,27 +186,27 @@ export class CallQueuedEvent extends Job {
     /**
      * The event class name.
      */
-    public eventClass: string;
+    public eventClass: string = '';
 
     /**
      * The serialized event payload.
      */
-    public eventPayload: Record<string, any>;
+    public eventPayload: Record<string, any> = {};
 
     /**
      * The event name.
      */
-    public eventName: string;
+    public eventName: string = '';
 
     constructor(
-        eventClass: string,
-        eventName: string,
-        eventPayload: Record<string, any>
+        eventClass?: string,
+        eventName?: string,
+        eventPayload?: Record<string, any>
     ) {
         super();
-        this.eventClass = eventClass;
-        this.eventName = eventName;
-        this.eventPayload = eventPayload;
+        if (eventClass) this.eventClass = eventClass;
+        if (eventName) this.eventName = eventName;
+        if (eventPayload) this.eventPayload = eventPayload;
     }
 
     /**
