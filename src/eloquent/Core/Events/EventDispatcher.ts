@@ -45,7 +45,6 @@ export interface ListenerRegistration {
         timeout?: number;
     };
     listenerClass?: new () => any;
-    listenerPath?: string;
 }
 
 /*
@@ -181,17 +180,19 @@ export class EventDispatcher {
         if (!queuedListeners || queuedListeners.size === 0) return;
 
         // Dynamic import to avoid circular dependencies
-        const { CallQueuedListener } = await require('./QueuedEventJobs');
+        const { CallQueuedListener, registerQueuedListener } = await require('./QueuedEventJobs');
         const { Queue } = await require('@/eloquent/Queue');
 
         for (const registration of queuedListeners) {
-            if (registration.listenerClass && registration.listenerPath) {
+            if (registration.listenerClass) {
+                // Register the listener class in the registry for queue worker to find
+                registerQueuedListener(registration.listenerClass.name, registration.listenerClass);
+
                 // Create a job to call the listener
                 const job = new CallQueuedListener(
                     registration.listenerClass.name,
                     event,
-                    payload,
-                    registration.listenerPath
+                    payload
                 );
 
                 // Apply queue config
