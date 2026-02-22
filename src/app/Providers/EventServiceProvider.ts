@@ -77,7 +77,6 @@ export class EventServiceProvider extends ServiceProvider {
                         shouldQueue: true,
                         queueConfig: metadata.queueConfig,
                         listenerClass: ListenerClass,
-                        listenerPath: '@/app/Listeners',
                     };
                     dispatcher.listenQueued(eventName, registration);
                 } else {
@@ -123,7 +122,6 @@ export class EventServiceProvider extends ServiceProvider {
                         timeout: listener.timeout,
                     },
                     listenerClass: ListenerClass,
-                    listenerPath: '@/app/Listeners',
                 };
                 dispatcher.listenQueued(eventName, registration);
             } else {
