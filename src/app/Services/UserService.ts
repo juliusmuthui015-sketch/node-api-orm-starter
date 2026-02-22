@@ -4,6 +4,7 @@ import User from '@/app/Models/User/User';
 import UserProfile from '@/app/Models/User/UserProfile';
 import Role from '@/app/Models/User/Role';
 import { RolesUsers } from '@/app/Models/User/RolesUsers';
+import {event} from "@/eloquent/Core";
 
 /*
 |--------------------------------------------------------------------------
@@ -76,7 +77,16 @@ export class UserService {
       throw new Error('User already exists');
     }
 
-    return User.create(data);
+    const user_ = await User.create(data);
+
+    // Dispatch event - listeners will handle sending welcome email
+    await event('user.registered', {
+      userId: user_.id,
+      email: user_.email,
+      name: user_.name,
+    });
+
+    return user_;
   }
 
   /**
