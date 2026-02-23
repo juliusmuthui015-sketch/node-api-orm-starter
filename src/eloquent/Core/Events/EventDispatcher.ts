@@ -543,6 +543,16 @@ export abstract class Event {
         const instance = new (this as any)(...args);
         return instance.dispatch();
     }
+
+    broadcastOn(): string[] {
+        return [
+        ];
+    }
+
+    broadcastWith(): Record<string, any> {
+        return {
+        };
+    }
 }
 
 /*

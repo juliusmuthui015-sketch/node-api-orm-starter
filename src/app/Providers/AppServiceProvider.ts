@@ -6,6 +6,7 @@ import {CacheServiceProvider} from "@app/Providers/CacheServiceProvider";
 import {RouteServiceProvider} from "@/app";
 import {QueueServiceProvider} from "@app/Providers/QueueServiceProvider";
 import {EventServiceProvider} from "@app/Providers/EventServiceProvider";
+import {BroadcastServiceProvider} from "@app/Providers/BroadcastServiceProvider";
 
 export class AppServiceProvider extends ServiceProvider {
     /*
@@ -23,6 +24,7 @@ export class AppServiceProvider extends ServiceProvider {
         RouteServiceProvider,
         QueueServiceProvider,
         EventServiceProvider,
+        BroadcastServiceProvider,
         // Example: BillingServiceProvider,
         // Example: NotificationServiceProvider,
     ];

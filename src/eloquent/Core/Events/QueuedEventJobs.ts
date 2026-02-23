@@ -91,7 +91,7 @@ export class CallQueuedListener extends Job {
                 // Try to auto-discover by importing app listeners
                 await this.discoverListeners();
                 ListenerClass = getQueuedListener(this.listenerClass);
-
+                
                 if (!ListenerClass) {
                     throw new Error(
                         `Listener class [${this.listenerClass}] not found in registry. ` +
@@ -134,7 +134,7 @@ export class CallQueuedListener extends Job {
         try {
             // Import all listeners - this will trigger decorator registration
             const listeners = await require('@/app/Listeners');
-
+            
             // Register all exported listener classes
             for (const [name, ExportedClass] of Object.entries(listeners)) {
                 if (typeof ExportedClass === 'function' && name !== 'Listener') {

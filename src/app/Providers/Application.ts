@@ -1,4 +1,5 @@
 import express, { Application as ExpressApp, RequestHandler } from 'express';
+import { createServer, Server as HttpServer } from 'http';
 import cors from 'cors';
 import { Container } from '@/eloquent/Container/Container';
 import { ServiceProvider, ServiceProviderClass } from '@/eloquent/Providers/ServiceProvider';
@@ -233,8 +234,29 @@ export class Application {
     |--------------------------------------------------------------------------
     */
 
+    private httpServer: HttpServer | null = null;
+
+    /**
+     * Get the HTTP server instance.
+     */
+    getHttpServer(): HttpServer | null {
+        return this.httpServer;
+    }
+
+    /**
+     * Create the HTTP server (required for WebSocket support).
+     */
+    createHttpServer(): HttpServer {
+        if (!this.httpServer) {
+            this.httpServer = createServer(this.expressApp);
+        }
+        return this.httpServer;
+    }
+
     listen(port: number | string, callback?: () => void): void {
-        this.expressApp.listen(port, callback);
+        // Create HTTP server if not already created
+        const server = this.createHttpServer();
+        server.listen(port, callback);
     }
 
     /*
