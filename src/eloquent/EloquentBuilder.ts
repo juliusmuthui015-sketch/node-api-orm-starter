@@ -1,7 +1,8 @@
 // EloquentBuilder.ts
 import { Model } from './Model';
 import { WhereClause, QueryResult, JoinClause, EagerLoadOptions } from './types';
-import { query as dbQuery, getDbType, collection as mongoCollection } from '@/config/db.config';
+import { getDbType, collection as mongoCollection } from '@/config/db.config';
+import DB from './DB';
 import { ObjectId } from 'mongodb';
 
 export class EloquentBuilder<T extends Model> {
@@ -40,6 +41,22 @@ export class EloquentBuilder<T extends Model> {
 
   constructor(model: typeof Model) {
     this.model = model;
+  }
+
+  /**
+   * Execute a SQL query using the active transaction if available
+   * This ensures all EloquentBuilder queries are transaction-aware
+   */
+  private async runQuery<R = any>(sql: string, params: any[] = []): Promise<R[]> {
+    return DB.executeQuery<R>(sql, params);
+  }
+
+  /**
+   * Get MongoDB session options for transaction support
+   * Returns { session } if in a transaction, or empty object
+   */
+  private getMongoSessionOptions(): { session?: any } {
+    return DB.getSessionOptions();
   }
 
   public getRelationTree(): Record<string, any> {
@@ -554,7 +571,7 @@ export class EloquentBuilder<T extends Model> {
     const sql = `UPDATE ${tableName} SET ${setSql}${where.sql}`;
     const params = [...keys.map((k) => (values as any)[k]), ...where.params];
 
-    const result: any = await dbQuery<any>(sql, params);
+    const result: any = await this.runQuery<any>(sql, params);
     return result && result.affectedRows ? Number(result.affectedRows) : 0;
   }
 
@@ -564,7 +581,7 @@ export class EloquentBuilder<T extends Model> {
     const where = this.buildWhereClause();
     const sql = `UPDATE ${tableName} SET ${column} = ${column} + ?${where.sql}`;
     const params = [amount, ...where.params];
-    const result: any = await dbQuery<any>(sql, params);
+    const result: any = await this.runQuery<any>(sql, params);
     return result && result.affectedRows ? Number(result.affectedRows) : 0;
   }
 
@@ -574,7 +591,7 @@ export class EloquentBuilder<T extends Model> {
     const where = this.buildWhereClause();
     const sql = `UPDATE ${tableName} SET ${column} = ${column} - ?${where.sql}`;
     const params = [amount, ...where.params];
-    const result: any = await dbQuery<any>(sql, params);
+    const result: any = await this.runQuery<any>(sql, params);
     return result && result.affectedRows ? Number(result.affectedRows) : 0;
   }
 
@@ -588,12 +605,12 @@ export class EloquentBuilder<T extends Model> {
       const now = new Date();
       const sql = `UPDATE ${tableName} SET deleted_at = ?${where.sql}`;
       const params = [now, ...where.params];
-      const result: any = await dbQuery<any>(sql, params);
+      const result: any = await this.runQuery<any>(sql, params);
       return result && result.affectedRows ? Number(result.affectedRows) : 0;
     }
 
     const sql = `DELETE FROM ${tableName}${where.sql}`;
-    const result: any = await dbQuery<any>(sql, where.params);
+    const result: any = await this.runQuery<any>(sql, where.params);
     return result && result.affectedRows ? Number(result.affectedRows) : 0;
   }
 
@@ -607,7 +624,7 @@ export class EloquentBuilder<T extends Model> {
     const sql = `INSERT INTO ${tableName} (${cols.join(',')}) VALUES ${placeholders}`;
     const params: any[] = [];
     rows.forEach((r) => cols.forEach((c) => params.push(r[c])));
-    const result: any = await dbQuery<any>(sql, params);
+    const result: any = await this.runQuery<any>(sql, params);
     return result && result.affectedRows ? Number(result.affectedRows) : 0;
   }
 
@@ -623,7 +640,7 @@ export class EloquentBuilder<T extends Model> {
         }
         delete doc.id;
       }
-      const res = await c.insertOne(doc);
+      const res = await c.insertOne(doc, this.getMongoSessionOptions());
       // return fake numeric id length for compatibility; Model.save will set id properly
       return res.insertedId as any as number;
     }
@@ -632,7 +649,7 @@ export class EloquentBuilder<T extends Model> {
     const placeholders = `(${cols.map(() => '?').join(',')})`;
     const sql = `INSERT INTO ${tableName} (${cols.join(',')}) VALUES ${placeholders}`;
     const params = cols.map((c) => row[c]);
-    const result: any = await dbQuery<any>(sql, params);
+    const result: any = await this.runQuery<any>(sql, params);
     return result.insertId;
   }
 
@@ -665,7 +682,7 @@ export class EloquentBuilder<T extends Model> {
     const where = this.buildWhereClause();
     this.columnQualifier = prev;
     const sql = `SELECT ${functionName.toUpperCase()}(${column}) as agg FROM ${tableName}${where.sql}`;
-    const rows = await dbQuery<any>(sql, where.params);
+    const rows = await this.runQuery<any>(sql, where.params);
     return rows[0]?.agg || '0';
   }
 
@@ -1237,7 +1254,7 @@ export class EloquentBuilder<T extends Model> {
     if (this.offsetValue !== undefined) parts.push(`OFFSET ${this.offsetValue}`);
 
     const sql = parts.join(' ');
-    const rows = await dbQuery<any>(sql, params);
+    const rows = await this.runQuery<any>(sql, params);
     return rows;
   }
 
@@ -1261,7 +1278,7 @@ export class EloquentBuilder<T extends Model> {
       params.push(...hasSql.params);
     }
     const sql = parts.join(' ').trim();
-    const rows = await dbQuery<any>(sql, params);
+    const rows = await this.runQuery<any>(sql, params);
     const countRow = rows[0] as any;
     return countRow ? Number(countRow.count) : 0;
   }
@@ -1485,7 +1502,7 @@ export class EloquentBuilder<T extends Model> {
       }
     }
 
-    const rows = await dbQuery<any>(sql, params);
+    const rows = await this.runQuery<any>(sql, params);
     const byFK = new Map<any, any>();
     rows.forEach((r) => byFK.set(r[foreignKey], r));
 
@@ -1542,7 +1559,7 @@ export class EloquentBuilder<T extends Model> {
       }
     }
 
-    const rows = await dbQuery<any>(sql, params);
+    const rows = await this.runQuery<any>(sql, params);
     const grouped = new Map<any, any>();
     rows.forEach((r) => {
       const k = r[foreignKey];
@@ -1603,7 +1620,7 @@ export class EloquentBuilder<T extends Model> {
       }
     }
 
-    const rows = await dbQuery<any>(sql, params);
+    const rows = await this.runQuery<any>(sql, params);
     const byOwner = new Map<any, any>();
     rows.forEach((r) => byOwner.set(r[ownerKey], r));
 
@@ -1651,7 +1668,7 @@ export class EloquentBuilder<T extends Model> {
     const pivotParams: any[] = [...parentIds];
 
     // Apply constraints to related rows after pivot fetch (not to pivot query itself)
-    const pivotRows = await dbQuery<any>(pivotSql, pivotParams);
+    const pivotRows = await this.runQuery<any>(pivotSql, pivotParams);
     if (!pivotRows.length) {
       models.forEach((m) => this.setRelation(m, relation, []));
       return;
@@ -1677,7 +1694,7 @@ export class EloquentBuilder<T extends Model> {
       }
     }
 
-    const relatedRows = await dbQuery<any>(relatedSql, relatedParams);
+    const relatedRows = await this.runQuery<any>(relatedSql, relatedParams);
     const relatedMap = new Map<any, any>();
     relatedRows.forEach((r) => relatedMap.set(r[relatedPK], r));
 
@@ -1847,7 +1864,7 @@ export class EloquentBuilder<T extends Model> {
       }
     }
 
-    const rows = await dbQuery<any>(sql, params);
+    const rows = await this.runQuery<any>(sql, params);
 
     if (rel.type === 'morphOne') {
       const byFK = new Map<any, any>();
@@ -2077,11 +2094,14 @@ export class EloquentBuilder<T extends Model> {
     const tableName = (this.model as typeof Model).getTable();
     const c = mongoCollection(tableName);
     const filter = this.buildMongoFilter();
+    const sessionOpts = this.getMongoSessionOptions();
     const proj =
       this.selectedColumns && this.selectedColumns.length && this.selectedColumns[0] !== '*'
         ? Object.fromEntries(this.selectedColumns.map((k) => [this.normalizeField(k), 1]))
         : undefined;
-    let cursor = c.find(filter, proj ? { projection: proj } : undefined);
+    const findOpts: any = { ...sessionOpts };
+    if (proj) findOpts.projection = proj;
+    let cursor = c.find(filter, findOpts);
     if (this.orderByColumn) {
       cursor = cursor.sort({
         [this.normalizeField(this.orderByColumn)]: this.orderByDirection === 'asc' ? 1 : -1,
@@ -2114,6 +2134,7 @@ export class EloquentBuilder<T extends Model> {
     const tableName = (this.model as typeof Model).getTable();
     const c = mongoCollection(tableName);
     const filter = this.buildMongoFilter();
+    const sessionOpts = this.getMongoSessionOptions();
     let updateDoc: any;
     if (
       Object.values(values).some(
@@ -2144,7 +2165,7 @@ export class EloquentBuilder<T extends Model> {
         ),
       };
     }
-    const res = await c.updateMany(filter, updateDoc);
+    const res = await c.updateMany(filter, updateDoc, sessionOpts);
     return Number(res.modifiedCount || 0);
   }
 
@@ -2152,12 +2173,13 @@ export class EloquentBuilder<T extends Model> {
     const tableName = (this.model as typeof Model).getTable();
     const c = mongoCollection(tableName);
     const filter = this.buildMongoFilter();
+    const sessionOpts = this.getMongoSessionOptions();
     const supportsSoft = Boolean((this.model as any).softDeletes);
     if (supportsSoft) {
-      const res = await c.updateMany(filter, { $set: { deleted_at: new Date() } });
+      const res = await c.updateMany(filter, { $set: { deleted_at: new Date() } }, sessionOpts);
       return Number(res.modifiedCount || 0);
     }
-    const res = await c.deleteMany(filter);
+    const res = await c.deleteMany(filter, sessionOpts);
     return Number(res.deletedCount || 0);
   }
 
@@ -2192,7 +2214,7 @@ export class EloquentBuilder<T extends Model> {
       });
       return d;
     });
-    const res = await c.insertMany(docs);
+    const res = await c.insertMany(docs, this.getMongoSessionOptions());
     return Object.keys(res.insertedIds || {}).length;
   }
 
@@ -2200,14 +2222,12 @@ export class EloquentBuilder<T extends Model> {
     const tableName = (this.model as typeof Model).getTable();
     const c = mongoCollection(tableName);
     const filter = this.buildMongoFilter();
+    const sessionOpts = this.getMongoSessionOptions();
     if (!this.hasConditions.length) {
-      return await c.countDocuments(filter);
+      return await c.countDocuments(filter, sessionOpts);
     }
-    // When whereHas/whereDoesntHave exist, fetch minimal docs and post-filter
-    // let docs = await c.find(filter, { projection: { _id: 1 } }).toArray();
-
-      // When whereHas/whereDoesntHave exist, fetch ALL fields (not just _id) so we can access foreign keys
-      let docs = await c.find(filter).toArray();
+    // When whereHas/whereDoesntHave exist, fetch ALL fields (not just _id) so we can access foreign keys
+    let docs = await c.find(filter, sessionOpts).toArray();
     docs = docs.map((d) => {
       if (d && d._id && !('id' in d)) d.id = String(d._id);
       return d;
@@ -2220,6 +2240,7 @@ export class EloquentBuilder<T extends Model> {
     const tableName = (this.model as typeof Model).getTable();
     const c = mongoCollection(tableName);
     const filter = this.buildMongoFilter();
+    const sessionOpts = this.getMongoSessionOptions();
     const field = this.normalizeField(column);
     const pipeline: any[] = [{ $match: filter }];
     const map: any = {
@@ -2230,9 +2251,9 @@ export class EloquentBuilder<T extends Model> {
       min: { $min: `$${field}` },
     };
     const key = fn.toLowerCase();
-    if (key === 'count') return String(await c.countDocuments(filter));
+    if (key === 'count') return String(await c.countDocuments(filter, sessionOpts));
     pipeline.push({ $group: { _id: null, agg: map[key] } });
-    const res = await c.aggregate(pipeline).toArray();
+    const res = await c.aggregate(pipeline, sessionOpts).toArray();
     return String(res[0]?.agg ?? 0);
   }
 
