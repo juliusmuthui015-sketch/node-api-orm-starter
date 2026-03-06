@@ -2,7 +2,8 @@
 import { ModelAttributes, RelationshipConfig, Casts } from './types';
 import { EloquentBuilder } from './EloquentBuilder';
 import { HasOne, HasMany, BelongsTo, BelongsToMany } from './relationships';
-import { query as dbQuery, getDbType, collection as mongoCollection } from '@/config/db.config';
+import { getDbType, collection as mongoCollection } from '@/config/db.config';
+import DB from './DB';
 import util from 'util';
 import { ObjectId } from 'mongodb';
 import {
@@ -1907,6 +1908,9 @@ export abstract class Model {
         });
       };
 
+      // Get session options for transaction support
+      const sessionOpts = DB.getSessionOptions();
+
       if (doInsert) {
         const doc: any = { ...attrs };
         if (primaryKey === 'id') {
@@ -1920,7 +1924,7 @@ export abstract class Model {
           }
         }
         normalizeForeignIds(doc);
-        const res = await c.insertOne(doc);
+        const res = await c.insertOne(doc, sessionOpts);
         if (primaryKey === 'id') this.setAttribute('id', String(res.insertedId));
         this.__exists = true;
 
@@ -1937,7 +1941,7 @@ export abstract class Model {
           normalizeForeignIds(setDoc);
           const filter: any =
             primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id };
-          await c.updateOne(filter, { $set: setDoc });
+          await c.updateOne(filter, { $set: setDoc }, sessionOpts);
 
           // Fire updated event
           await staticClass.fireModelEvent('updated', this);
@@ -1980,7 +1984,7 @@ export abstract class Model {
       const placeholders = insertCols.map(() => '?').join(',');
       const sql = `INSERT INTO ${table} (${insertCols.join(',')}) VALUES (${placeholders})`;
       const params = insertCols.map((c) => normalizeSqlParam(attrs[c]));
-      const result: any = await dbQuery<any>(sql, params);
+      const result: any = await DB.executeQuery<any>(sql, params);
       if ((staticClass as any).autoIncrement && result && result.insertId !== undefined) {
         this.setAttribute(primaryKey, result.insertId);
       }
@@ -1995,7 +1999,7 @@ export abstract class Model {
         const setSql = setCols.map((c) => `${c} = ?`).join(', ');
         const sql = `UPDATE ${table} SET ${setSql} WHERE ${primaryKey} = ?`;
         const params = [...setCols.map((c) => normalizeSqlParam(dirty[c])), id];
-        await dbQuery<any>(sql, params);
+        await DB.executeQuery<any>(sql, params);
 
         // Fire updated event
         await staticClass.fireModelEvent('updated', this);
@@ -2033,16 +2037,19 @@ export abstract class Model {
 
     if (getDbType() === 'mongodb') {
       const c = mongoCollection(table);
+      const sessionOpts = DB.getSessionOptions();
       if ((staticClass as any).softDeletes && !force) {
         await c.updateOne(
           primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
           { $set: { deleted_at: new Date() } },
+          sessionOpts,
         );
         this.setAttribute('deleted_at', new Date());
         result = true;
       } else {
         await c.deleteOne(
           primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+          sessionOpts,
         );
         result = true;
       }
@@ -2051,11 +2058,11 @@ export abstract class Model {
         const now = new Date();
         this.setAttribute('deleted_at', now);
         const sql = `UPDATE ${table} SET deleted_at = ? WHERE ${primaryKey} = ?`;
-        await dbQuery<any>(sql, [now, id]);
+        await DB.executeQuery<any>(sql, [now, id]);
         result = true;
       } else {
         const sql = `DELETE FROM ${table} WHERE ${primaryKey} = ?`;
-        await dbQuery<any>(sql, [id]);
+        await DB.executeQuery<any>(sql, [id]);
         result = true;
       }
     }
@@ -2094,14 +2101,16 @@ export abstract class Model {
 
     if (getDbType() === 'mongodb') {
       const c = mongoCollection(table);
+      const sessionOpts = DB.getSessionOptions();
       await c.updateOne(
         primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
         { $set: { deleted_at: null } },
+        sessionOpts,
       );
       result = true;
     } else {
       const sql = `UPDATE ${table} SET deleted_at = NULL WHERE ${primaryKey} = ?`;
-      await dbQuery<any>(sql, [id]);
+      await DB.executeQuery<any>(sql, [id]);
       result = true;
     }
 
@@ -2131,16 +2140,19 @@ export abstract class Model {
 
     if (getDbType() === 'mongodb') {
       const c = mongoCollection(table);
+      const sessionOpts = DB.getSessionOptions();
       if ((staticClass as any).softDeletes && !force) {
         await c.updateOne(
           primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
           { $set: { deleted_at: new Date() } },
+          sessionOpts,
         );
         this.setAttribute('deleted_at', new Date());
         return true;
       } else {
         await c.deleteOne(
           primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+          sessionOpts,
         );
         return true;
       }
@@ -2150,11 +2162,11 @@ export abstract class Model {
       const now = new Date();
       this.setAttribute('deleted_at', now);
       const sql = `UPDATE ${table} SET deleted_at = ? WHERE ${primaryKey} = ?`;
-      await dbQuery<any>(sql, [now, id]);
+      await DB.executeQuery<any>(sql, [now, id]);
       return true;
     } else {
       const sql = `DELETE FROM ${table} WHERE ${primaryKey} = ?`;
-      await dbQuery<any>(sql, [id]);
+      await DB.executeQuery<any>(sql, [id]);
       return true;
     }
   }
@@ -2176,15 +2188,17 @@ export abstract class Model {
 
     if (getDbType() === 'mongodb') {
       const c = mongoCollection(table);
+      const sessionOpts = DB.getSessionOptions();
       await c.updateOne(
         primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
         { $set: { deleted_at: null } },
+        sessionOpts,
       );
       return true;
     }
 
     const sql = `UPDATE ${table} SET deleted_at = NULL WHERE ${primaryKey} = ?`;
-    await dbQuery<any>(sql, [id]);
+    await DB.executeQuery<any>(sql, [id]);
     return true;
   }
 
