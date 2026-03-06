@@ -2,7 +2,7 @@ import { Router, RequestHandler, Request, Response } from 'express';
 import { resolveMiddleware } from '@/eloquent/Middleware/middleware';
 import { Model } from '@/eloquent/Model';
 import { EloquentBuilder } from '@/eloquent/EloquentBuilder';
-import { container, Constructor } from '@/eloquent/Container/Container';
+import { container } from '@/eloquent/Container/Container';
 
 // Type for controller method with model injection
 type ControllerMethod =
@@ -204,6 +204,20 @@ export class RouterBuilder {
     return this.middlewareStack.reduce<RequestHandler[]>((acc, cur) => acc.concat(cur || []), []);
   }
 
+  // Helper to detect ES6 class constructors vs plain functions
+  // We need to avoid treating normal middleware functions (e.g. multer handlers)
+  // as controller classes; testing the Function#toString for a leading "class"
+  // is a reliable heuristic across transpiled and native code.
+  private isClassConstructor(fn: any): boolean {
+    try {
+      if (typeof fn !== 'function') return false;
+      const str = Function.prototype.toString.call(fn);
+      return /^class\s/.test(str);
+    } catch (e) {
+      return false;
+    }
+  }
+
   // Setup built-in middleware
   private setupBuiltInMiddleware(): void {
     // You can add Express middleware initialization here
@@ -365,7 +379,7 @@ export class RouterBuilder {
 
           return controllerInstance[methodName](req, res, ...models);
         };
-      } else if (typeof h === 'function' && h.prototype && !h.prototype.constructor.name.includes('anonymous')) {
+      } else if (this.isClassConstructor(h)) {
          // It's likely a class, we'll try to resolve it and call 'handle' or use it as is if it's already a handler
          // Actually, usually in Laravel-style, if it's a class it might be a single-action controller (invokable)
          const ControllerClass = h;
@@ -377,7 +391,7 @@ export class RouterBuilder {
            }
            return method;
          };
-      }
+       }
 
       const r = resolveMiddleware(h as any);
       if (Array.isArray(r)) resolvedHandlers.push(...(r as any));
