@@ -141,7 +141,45 @@ export async function initDatabase(): Promise<void> {
   if (mongoDb) return;
   const mongoUri =
     process.env.MONGO_URI || process.env.MONGODB_URI || `mongodb://${dbHost}:${dbPort || 27017}`;
-  const client = new MongoClient(mongoUri, { serverSelectionTimeoutMS: 10000 });
+
+  // Replica set configuration
+  // If MONGO_REPLICA_SET is set, we're using a replica set
+  const replicaSet = process.env.MONGO_REPLICA_SET || undefined;
+  const isReplicaSet = !!replicaSet || process.env.MONGO_DIRECT_CONNECTION === 'false';
+
+  // directConnection: For standalone MongoDB, set to true (default for local dev)
+  // For replica sets, must be false or undefined to allow driver to discover all nodes
+  // Default: true for standalone (safe local dev), false if replica set is configured
+  const directConnection = process.env.MONGO_DIRECT_CONNECTION === 'true'
+    ? true
+    : process.env.MONGO_DIRECT_CONNECTION === 'false'
+      ? false
+      : !isReplicaSet; // Default: true for standalone, false for replica set
+
+  // retryWrites: Requires replica set. MongoDB 7.x uses transaction numbers for retryable writes
+  // Default: true for replica sets, false for standalone (to avoid "Transaction numbers" error)
+  const retryWrites = process.env.MONGO_RETRY_WRITES === 'true'
+    ? true
+    : process.env.MONGO_RETRY_WRITES === 'false'
+      ? false
+      : isReplicaSet; // Default based on replica set detection
+
+  const clientOptions: any = {
+    serverSelectionTimeoutMS: 10000,
+    retryWrites,
+  };
+
+  // Only set directConnection if not using replica set (it's incompatible with replicaSet option)
+  if (!isReplicaSet) {
+    clientOptions.directConnection = directConnection;
+  }
+
+  // Add replica set name if configured
+  if (replicaSet) {
+    clientOptions.replicaSet = replicaSet;
+  }
+
+  const client = new MongoClient(mongoUri, clientOptions);
   await client.connect();
   mongoClient = client;
   mongoDb = client.db(dbName);
