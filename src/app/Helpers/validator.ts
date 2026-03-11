@@ -3,25 +3,41 @@ import { Model } from '@/eloquent/Model';
 export class ValidationError extends Error {
   errors: Record<string, string[]>;
   messages: Record<string, string[]>;
+  message: string;
 
   constructor(errors: Record<string, string[]>, messages?: Record<string, string[]>) {
     super('Validation failed');
     this.errors = errors;
     this.messages = messages || {};
+    this.message = "unknown error"
+    // 1. Get the total count of all errors in all arrays
+    const totalErrors = Object.values(this.messages)
+        .reduce((sum, currentArray) => sum + currentArray.length, 0);
+
+    // 2. Get the first error to display
+    const firstError = Object.values(this.messages).find(arr => arr.length > 0)?.[0];
+
+    if (firstError) {
+      if (totalErrors > 1) {
+        this.message = `${firstError} and ${totalErrors - 1} more error(s).`;
+      } else {
+        this.message = firstError;
+      }
+    }
     Object.setPrototypeOf(this, ValidationError.prototype);
   }
 }
 
 export type RuleFn = (
-  value: any,
-  field: string,
-  payload?: any,
+    value: any,
+    field: string,
+    payload?: any,
 ) => true | { ok: boolean; message?: string; value?: any } | false | Promise<any>;
 
 export type RuleSpec =
-  | string
-  | RuleFn
-  | { rule: string | RuleFn; messages?: Record<string, string> };
+    | string
+    | RuleFn
+    | { rule: string | RuleFn; messages?: Record<string, string> };
 
 // Extended default message catalog
 const defaultMessages: Record<string, string> = {
@@ -98,15 +114,15 @@ const defaultMessages: Record<string, string> = {
 // Helper functions
 function formatMessage(template: string, ctx: Record<string, any>): string {
   return template.replace(/:([a-zA-Z_]+)/g, (_, key) =>
-    ctx[key] !== undefined ? String(ctx[key]) : ':' + key,
+      ctx[key] !== undefined ? String(ctx[key]) : ':' + key,
   );
 }
 
 function resolveMessage(
-  field: string,
-  code: string,
-  meta: Record<string, any>,
-  custom?: Record<string, string>,
+    field: string,
+    code: string,
+    meta: Record<string, any>,
+    custom?: Record<string, string>,
 ): string {
   let variantCode = code;
   if (['min', 'max', 'size', 'between'].includes(code) && meta.kind) {
@@ -130,9 +146,9 @@ function resolveMessage(
 
 // Core validation function
 export async function validate<T extends Record<string, any>>(
-  payload: any,
-  rules: Record<string, RuleSpec>,
-  customMessages?: Record<string, string>,
+    payload: any,
+    rules: Record<string, RuleSpec>,
+    customMessages?: Record<string, string>,
 ): Promise<T> {
   const out = { ...(payload || {}) } as unknown as T & Record<string, any>;
   const errors: Record<string, string[]> = {};
@@ -143,9 +159,9 @@ export async function validate<T extends Record<string, any>>(
   // Helper: normalize pattern (treat consecutive dots as wildcard)
   function normalizePattern(p: string) {
     return p
-      .replace(/\.\.+/g, '.*')
-      .replace(/(^|\.)\*(\.|$)/g, (_, a, b) => '*' + (b ? '.' : ''))
-      .replace(/\.\*/g, '.*');
+        .replace(/\.\.+/g, '.*')
+        .replace(/(^|\.)\*(\.|$)/g, (_, a, b) => '*' + (b ? '.' : ''))
+        .replace(/\.\*/g, '.*');
   }
 
   // Helper: split pattern into segments, keeping empty segments as wildcard
@@ -245,9 +261,9 @@ export async function validate<T extends Record<string, any>>(
             // try CSV
             if (parentVal.includes(',')) {
               const parts = parentVal
-                .split(',')
-                .map((s: string) => s.trim())
-                .filter(Boolean);
+                  .split(',')
+                  .map((s: string) => s.trim())
+                  .filter(Boolean);
               for (let i = 0; i < parts.length; i++) {
                 recurse(parts[i], idx + 1, prefix + '.' + i);
               }
@@ -331,9 +347,9 @@ export async function validate<T extends Record<string, any>>(
           } catch {}
           if (parentVal.includes(',')) {
             const parts = parentVal
-              .split(',')
-              .map((s: string) => s.trim())
-              .filter(Boolean);
+                .split(',')
+                .map((s: string) => s.trim())
+                .filter(Boolean);
             for (let i = 0; i < parts.length; i++) pathsToValidate.push(`${parentPath}.${i}`);
             continue;
           }
@@ -372,9 +388,9 @@ export async function validate<T extends Record<string, any>>(
 
       // Handle string rules
       const parts = String(fieldRule)
-        .split('|')
-        .map((s) => s.trim())
-        .filter(Boolean);
+          .split('|')
+          .map((s) => s.trim())
+          .filter(Boolean);
 
       const isRequired = parts.includes('required');
       const isNullable = parts.includes('nullable');
@@ -505,7 +521,7 @@ export async function validate<T extends Record<string, any>>(
 
           case p === 'uuid':
             const uuidRegex =
-              /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+                /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
             if (!uuidRegex.test(String(val))) {
               pushError(field, 'uuid', { value: val, kind: typeof val });
               failed = true;
@@ -614,13 +630,13 @@ export async function validate<T extends Record<string, any>>(
           case p === 'confirmed':
             const confirmationField = `${field}_confirmation`;
             if (
-              out &&
-              (out[confirmationField] ||
-                out['confirmation_' + field] ||
-                out[field + '_confirmed'] ||
-                out['confirmed_' + field] ||
-                out['confirm_' + field] ||
-                out['confirm_' + field]) !== val
+                out &&
+                (out[confirmationField] ||
+                    out['confirmation_' + field] ||
+                    out[field + '_confirmed'] ||
+                    out['confirmed_' + field] ||
+                    out['confirm_' + field] ||
+                    out['confirm_' + field]) !== val
             ) {
               pushError(field, 'confirmed', { other: confirmationField });
               failed = true;
@@ -765,9 +781,9 @@ export async function validate<T extends Record<string, any>>(
 
   async function handleInRule(field: string, val: any, rule: string) {
     const opts = rule
-      .split(':')[1]
-      .split(',')
-      .map((s) => s.trim());
+        .split(':')[1]
+        .split(',')
+        .map((s) => s.trim());
     if (!opts.includes(String(val))) {
       pushError(field, 'in', { value: val, values: opts.join(', ') });
       return true;
@@ -777,9 +793,9 @@ export async function validate<T extends Record<string, any>>(
 
   async function handleNotInRule(field: string, val: any, rule: string) {
     const opts = rule
-      .split(':')[1]
-      .split(',')
-      .map((s) => s.trim());
+        .split(':')[1]
+        .split(',')
+        .map((s) => s.trim());
     if (opts.includes(String(val))) {
       pushError(field, 'not_in', { value: val, values: opts.join(', ') });
       return true;
@@ -836,8 +852,8 @@ export async function validate<T extends Record<string, any>>(
         exceptColumn = exceptArg;
         exceptValue = exceptArg2;
       } else if (exceptArg !== undefined) {
-          // caller provided explicit except value
-          exceptValue = exceptArg;
+        // caller provided explicit except value
+        exceptValue = exceptArg;
       }
 
       let q = ValidatorModel.query().where(column, '=', val);
@@ -876,9 +892,9 @@ export async function validate<T extends Record<string, any>>(
 
   async function handleStartsWithRule(field: string, val: any, rule: string) {
     const prefixes = rule
-      .split(':')[1]
-      .split(',')
-      .map((s) => s.trim());
+        .split(':')[1]
+        .split(',')
+        .map((s) => s.trim());
     const strVal = String(val);
     if (!prefixes.some((prefix) => strVal.startsWith(prefix))) {
       pushError(field, 'starts_with', { value: val, prefixes: prefixes.join(', ') });
@@ -889,9 +905,9 @@ export async function validate<T extends Record<string, any>>(
 
   async function handleEndsWithRule(field: string, val: any, rule: string) {
     const suffixes = rule
-      .split(':')[1]
-      .split(',')
-      .map((s) => s.trim());
+        .split(':')[1]
+        .split(',')
+        .map((s) => s.trim());
     const strVal = String(val);
     if (!suffixes.some((suffix) => strVal.endsWith(suffix))) {
       pushError(field, 'ends_with', { value: val, suffixes: suffixes.join(', ') });
@@ -911,11 +927,11 @@ export async function validate<T extends Record<string, any>>(
   }
 
   async function handleComparisonRule(
-    field: string,
-    val: any,
-    rule: string,
-    operator: string,
-    payload: any,
+      field: string,
+      val: any,
+      rule: string,
+      operator: string,
+      payload: any,
   ) {
     const otherField = rule.split(':')[1];
     const otherValue = payload ? payload[otherField] : undefined;
@@ -953,34 +969,34 @@ export async function validate<T extends Record<string, any>>(
 
 // Custom rule functions
 export const requiredIf =
-  (otherField: string, value: any): RuleFn =>
-  async (val, field, payload) => {
-    if (payload && payload[otherField] === value) {
-      if (val === undefined || val === null || val === '') {
-        return { ok: false, message: 'required' };
-      }
-    }
-    return true;
-  };
+    (otherField: string, value: any): RuleFn =>
+        async (val, field, payload) => {
+          if (payload && payload[otherField] === value) {
+            if (val === undefined || val === null || val === '') {
+              return { ok: false, message: 'required' };
+            }
+          }
+          return true;
+        };
 
 export const requiredUnless =
-  (otherField: string, value: any): RuleFn =>
-  async (val, field, payload) => {
-    if (payload && payload[otherField] !== value) {
-      if (val === undefined || val === null || val === '') {
-        return { ok: false, message: 'required' };
-      }
-    }
-    return true;
-  };
+    (otherField: string, value: any): RuleFn =>
+        async (val, field, payload) => {
+          if (payload && payload[otherField] !== value) {
+            if (val === undefined || val === null || val === '') {
+              return { ok: false, message: 'required' };
+            }
+          }
+          return true;
+        };
 
 // File validation rules
 export const fileRule: RuleFn = async (value) => {
   if (!value) return true;
 
   if (
-    typeof value === 'object' &&
-    (value instanceof File || ('name' in value && 'size' in value))
+      typeof value === 'object' &&
+      (value instanceof File || ('name' in value && 'size' in value))
   ) {
     return true;
   }
@@ -989,63 +1005,63 @@ export const fileRule: RuleFn = async (value) => {
 };
 
 export const mimes =
-  (allowedTypes: string[]): RuleFn =>
-  async (value) => {
-    if (!value) return true;
+    (allowedTypes: string[]): RuleFn =>
+        async (value) => {
+          if (!value) return true;
 
-    let fileName = '';
-    if (typeof value === 'string') {
-      fileName = value;
-    } else if (value && typeof value === 'object') {
-      fileName = value.name || '';
-    }
+          let fileName = '';
+          if (typeof value === 'string') {
+            fileName = value;
+          } else if (value && typeof value === 'object') {
+            fileName = value.name || '';
+          }
 
-    const extension = fileName.split('.').pop()?.toLowerCase() || '';
-    const mimeTypes: Record<string, string[]> = {
-      jpg: ['image/jpeg'],
-      jpeg: ['image/jpeg'],
-      png: ['image/png'],
-      gif: ['image/gif'],
-      pdf: ['application/pdf'],
-      doc: ['application/msword'],
-      docx: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
-    };
+          const extension = fileName.split('.').pop()?.toLowerCase() || '';
+          const mimeTypes: Record<string, string[]> = {
+            jpg: ['image/jpeg'],
+            jpeg: ['image/jpeg'],
+            png: ['image/png'],
+            gif: ['image/gif'],
+            pdf: ['application/pdf'],
+            doc: ['application/msword'],
+            docx: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
+          };
 
-    const allowedExtensions = allowedTypes
-      .map((type) => {
-        for (const [ext, mimes] of Object.entries(mimeTypes)) {
-          if (mimes.includes(type)) return ext;
-        }
-        return type.split('/').pop();
-      })
-      .filter(Boolean);
+          const allowedExtensions = allowedTypes
+              .map((type) => {
+                for (const [ext, mimes] of Object.entries(mimeTypes)) {
+                  if (mimes.includes(type)) return ext;
+                }
+                return type.split('/').pop();
+              })
+              .filter(Boolean);
 
-    if (!allowedExtensions.includes(extension)) {
-      return { ok: false, message: 'mimes', value: allowedTypes.join(', ') };
-    }
+          if (!allowedExtensions.includes(extension)) {
+            return { ok: false, message: 'mimes', value: allowedTypes.join(', ') };
+          }
 
-    return true;
-  };
+          return true;
+        };
 
 export const maxFileSize =
-  (maxSizeInMB: number): RuleFn =>
-  async (value) => {
-    if (!value) return true;
+    (maxSizeInMB: number): RuleFn =>
+        async (value) => {
+          if (!value) return true;
 
-    let fileSize = 0;
-    if (value instanceof File) {
-      fileSize = value.size;
-    } else if (value && typeof value === 'object' && 'size' in value) {
-      fileSize = value.size;
-    }
+          let fileSize = 0;
+          if (value instanceof File) {
+            fileSize = value.size;
+          } else if (value && typeof value === 'object' && 'size' in value) {
+            fileSize = value.size;
+          }
 
-    const maxSizeInBytes = maxSizeInMB * 1024 * 1024;
-    if (fileSize > maxSizeInBytes) {
-      return { ok: false, message: 'max_file_size', value: maxSizeInMB };
-    }
+          const maxSizeInBytes = maxSizeInMB * 1024 * 1024;
+          if (fileSize > maxSizeInBytes) {
+            return { ok: false, message: 'max_file_size', value: maxSizeInMB };
+          }
 
-    return true;
-  };
+          return true;
+        };
 
 // Phone number validation
 export const phoneRule: RuleFn = (value) => {
@@ -1115,9 +1131,9 @@ export const imagesRule: RuleFn = async (value: any) => {
         return {
           ok: true,
           value: value
-            .split(',')
-            .map((s: string) => s.trim())
-            .filter(Boolean),
+              .split(',')
+              .map((s: string) => s.trim())
+              .filter(Boolean),
         };
       }
       return { ok: true, value: [value] };
@@ -1146,9 +1162,9 @@ export const amenitiesRule: RuleFn = async (value: any) => {
         return {
           ok: true,
           value: value
-            .split(',')
-            .map((s: string) => s.trim())
-            .filter(Boolean),
+              .split(',')
+              .map((s: string) => s.trim())
+              .filter(Boolean),
         };
       }
       return { ok: true, value: [value] };
@@ -1161,57 +1177,57 @@ export const amenitiesRule: RuleFn = async (value: any) => {
 
 // Nested object validation
 export const nestedRule =
-  (rules: Record<string, RuleSpec>): RuleFn =>
-  async (value, field, payload) => {
-    if (value === undefined || value === null) return true;
+    (rules: Record<string, RuleSpec>): RuleFn =>
+        async (value, field, payload) => {
+          if (value === undefined || value === null) return true;
 
-    if (typeof value !== 'object' || Array.isArray(value)) {
-      return { ok: false, message: 'object' };
-    }
+          if (typeof value !== 'object' || Array.isArray(value)) {
+            return { ok: false, message: 'object' };
+          }
 
-    try {
-      await validate(value, rules);
-      return true;
-    } catch (error) {
-      return { ok: false, message: 'nested_validation_failed' };
-    }
-  };
+          try {
+            await validate(value, rules);
+            return true;
+          } catch (error) {
+            return { ok: false, message: 'nested_validation_failed' };
+          }
+        };
 
 // Array of objects validation
 export const arrayOfObjectsRule =
-  (rules: Record<string, RuleSpec>): RuleFn =>
-  async (value, field, payload) => {
-    if (value === undefined || value === null) return true;
+    (rules: Record<string, RuleSpec>): RuleFn =>
+        async (value, field, payload) => {
+          if (value === undefined || value === null) return true;
 
-    let array: any[];
-    if (Array.isArray(value)) {
-      array = value;
-    } else if (typeof value === 'string') {
-      try {
-        const parsed = JSON.parse(value);
-        array = Array.isArray(parsed) ? parsed : [parsed];
-      } catch {
-        return { ok: false, message: 'array' };
-      }
-    } else {
-      array = [value];
-    }
+          let array: any[];
+          if (Array.isArray(value)) {
+            array = value;
+          } else if (typeof value === 'string') {
+            try {
+              const parsed = JSON.parse(value);
+              array = Array.isArray(parsed) ? parsed : [parsed];
+            } catch {
+              return { ok: false, message: 'array' };
+            }
+          } else {
+            array = [value];
+          }
 
-    for (let i = 0; i < array.length; i++) {
-      const item = array[i];
-      if (typeof item !== 'object' || Array.isArray(item)) {
-        return { ok: false, message: 'object_array' };
-      }
+          for (let i = 0; i < array.length; i++) {
+            const item = array[i];
+            if (typeof item !== 'object' || Array.isArray(item)) {
+              return { ok: false, message: 'object_array' };
+            }
 
-      try {
-        await validate(item, rules);
-      } catch (error) {
-        return { ok: false, message: `items[${i}].validation_failed` };
-      }
-    }
+            try {
+              await validate(item, rules);
+            } catch (error) {
+              return { ok: false, message: `items[${i}].validation_failed` };
+            }
+          }
 
-    return { ok: true, value: array };
-  };
+          return { ok: true, value: array };
+        };
 
 // Export utility functions for external use
 export { formatMessage, resolveMessage };

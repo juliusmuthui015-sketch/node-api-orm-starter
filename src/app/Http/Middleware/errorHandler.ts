@@ -10,9 +10,9 @@ export default function errorHandler(err: any, req: Request, res: Response, _nex
     if (err instanceof ValidationError) {
         return res.status(422).json({
             success: false,
-            message: 'Validation failed',
             errors: err.errors,
             messages: err.messages,
+            message: err.message
         });
     }
 
