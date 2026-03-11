@@ -1,4 +1,4 @@
-import type { MigrationSchema, TableBuilder } from '../Schema';
+import {MigrationSchema, TableBuilder} from "@/eloquent/Database";
 import { EUserType } from '@/app/Enums';
 import { UserProfile } from '@/app/Models/User/UserProfile';
 

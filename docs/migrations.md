@@ -17,7 +17,7 @@ This creates a timestamped file in `src/database/migrations/`.
 
 ```typescript
 // src/database/migrations/20240101000000_create_posts_table.ts
-import type { MigrationSchema, TableBuilder } from '../Schema';
+import {MigrationSchema, TableBuilder} from "@/eloquent/Database";
 
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 

@@ -2,7 +2,7 @@ import { Command } from '@/eloquent/Command/Command';
 import { ArgumentsCamelCase } from 'yargs';
 import fs from 'fs';
 import path from 'path';
-import { runMigrations, migrateFresh, runSeeders, rollbackMigrations } from '@/database';
+import { runMigrations, migrateFresh, runSeeders, rollbackMigrations } from '@/eloquent/Database';
 
 export class MigrateCommand extends Command {
     protected signature = 'migrate';
@@ -238,19 +238,26 @@ export class MakeMigrationCommand extends Command {
             type: 'string' as const,
             description: 'The table to be created/modified',
         },
-        alter: {
-            type: 'boolean' as const,
-            description: 'Create an alter table migration',
-            default: false,
+        create: {
+            type: 'string' as const,
+            description: 'The table to be created',
         },
     };
 
     async handle(args: ArgumentsCamelCase): Promise<void> {
         const name = String(args.name);
-        const table = args.table as string | undefined;
-        const alter = args.alter as boolean;
+        const tableOption = args.table as string | undefined;
+        const createOption = args.create as string | undefined;
+
+        // Parse the migration name to extract table and action
+        const parsed = this.parseMigrationName(name);
+
+        // Options override parsed values
+        const table = createOption || tableOption || parsed.table;
+        const action = createOption ? 'create' : (tableOption ? 'alter' : parsed.action);
 
         const timestamp = this.getTimestamp();
+        const className = this.pascalCase(name) + 'Migration';
         const fileName = `${timestamp}_${name.replace(/\s+/g, '_')}.ts`;
         const dir = path.resolve(process.cwd(), 'src/database/migrations');
 
@@ -259,10 +266,97 @@ export class MakeMigrationCommand extends Command {
         }
 
         const filePath = path.join(dir, fileName);
-        const template = this.getTemplate(name, table, alter);
+        const template = this.getTemplate(name, className, table, action);
 
         fs.writeFileSync(filePath, template);
         this.info(`Created migration: ${fileName}`);
+        if (table) {
+            this.info(`Table: ${table} (${action})`);
+        }
+    }
+
+    /**
+     * Parse migration name to extract table name and action type.
+     * Follows Laravel conventions:
+     * - create_users_table → creates 'users' table
+     * - add_column_to_users_table → alters 'users' table
+     * - add_column_to_users → alters 'users' table
+     * - remove_column_from_users_table → alters 'users' table
+     * - modify_column_in_users_table → alters 'users' table
+     * - drop_users_table → drops 'users' table
+     * - rename_users_table → alters 'users' table
+     */
+    private parseMigrationName(name: string): { table: string | undefined; action: 'create' | 'alter' | 'drop' } {
+        const normalized = name.toLowerCase().replace(/\s+/g, '_');
+
+        // Pattern: create_xxx_table or create_xxx
+        const createMatch = normalized.match(/^create_(.+?)(?:_table)?$/);
+        if (createMatch) {
+            return { table: createMatch[1], action: 'create' };
+        }
+
+        // Pattern: drop_xxx_table or drop_xxx
+        const dropMatch = normalized.match(/^drop_(.+?)(?:_table)?$/);
+        if (dropMatch) {
+            return { table: dropMatch[1], action: 'drop' };
+        }
+
+        // Pattern: add_xxx_to_yyy_table or add_xxx_to_yyy
+        const addToMatch = normalized.match(/^add_.+_to_(.+?)(?:_table)?$/);
+        if (addToMatch) {
+            return { table: addToMatch[1], action: 'alter' };
+        }
+
+        // Pattern: remove_xxx_from_yyy_table or remove_xxx_from_yyy
+        const removeFromMatch = normalized.match(/^remove_.+_from_(.+?)(?:_table)?$/);
+        if (removeFromMatch) {
+            return { table: removeFromMatch[1], action: 'alter' };
+        }
+
+        // Pattern: modify_xxx_in_yyy_table or modify_xxx_in_yyy or change_xxx_in_yyy
+        const modifyInMatch = normalized.match(/^(?:modify|change|update)_.+_in_(.+?)(?:_table)?$/);
+        if (modifyInMatch) {
+            return { table: modifyInMatch[1], action: 'alter' };
+        }
+
+        // Pattern: rename_xxx_to_yyy_in_zzz_table (rename column)
+        const renameColMatch = normalized.match(/^rename_.+_to_.+_in_(.+?)(?:_table)?$/);
+        if (renameColMatch) {
+            return { table: renameColMatch[1], action: 'alter' };
+        }
+
+        // Pattern: rename_xxx_table_to_yyy (rename table - still uses alter)
+        const renameTableMatch = normalized.match(/^rename_(.+?)_table(?:_to_.+)?$/);
+        if (renameTableMatch) {
+            return { table: renameTableMatch[1], action: 'alter' };
+        }
+
+        // Pattern: xxx_to_yyy_table (generic "to table" pattern)
+        const toTableMatch = normalized.match(/.+_to_(.+?)(?:_table)?$/);
+        if (toTableMatch) {
+            return { table: toTableMatch[1], action: 'alter' };
+        }
+
+        // Pattern: xxx_from_yyy_table (generic "from table" pattern)
+        const fromTableMatch = normalized.match(/.+_from_(.+?)(?:_table)?$/);
+        if (fromTableMatch) {
+            return { table: fromTableMatch[1], action: 'alter' };
+        }
+
+        // Pattern: xxx_in_yyy_table (generic "in table" pattern)
+        const inTableMatch = normalized.match(/.+_in_(.+?)(?:_table)?$/);
+        if (inTableMatch) {
+            return { table: inTableMatch[1], action: 'alter' };
+        }
+
+        // Pattern: xxx_on_yyy_table (generic "on table" pattern)
+        const onTableMatch = normalized.match(/.+_on_(.+?)(?:_table)?$/);
+        if (onTableMatch) {
+            return { table: onTableMatch[1], action: 'alter' };
+        }
+
+        // No pattern matched - return undefined table
+        return { table: undefined, action: 'create' };
     }
 
     private getTimestamp(): string {
@@ -271,46 +365,122 @@ export class MakeMigrationCommand extends Command {
         return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
     }
 
-    private getTemplate(name: string, table?: string, alter?: boolean): string {
+    private pascalCase(str: string): string {
+        return str
+            .replace(/[^a-zA-Z0-9]+/g, ' ')
+            .split(' ')
+            .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+            .join('');
+    }
+
+    private getTemplate(name: string, className: string, table?: string, action: 'create' | 'alter' | 'drop' = 'create'): string {
         const tbl = table || name.replace(/[^a-z0-9_]/gi, '_').toLowerCase();
 
-        if (alter && table) {
-            return `import type { MigrationSchema, TableBuilder } from '@/database';
+        if (action === 'drop') {
+            return `import type { Migration, MigrationSchema, TableBuilder, QueryFn } from '@/eloquent/Database/Schema';
 
-type QueryFn = (sql: string, params?: any[]) => Promise<any>;
+/**
+ * Migration: ${name}
+ * Drop table: ${tbl}
+ */
+export default class ${className} implements Migration {
+    /**
+     * Run the migrations.
+     */
+    async up(schema: MigrationSchema, query?: QueryFn): Promise<any> {
+        return schema.dropTable('${tbl}');
+    }
 
-// Migration: ${name}
-// Alter table ${table}
-module.exports.up = async function (schema: MigrationSchema, _query: QueryFn) {
-    return schema.alterTable('${table}', (table: TableBuilder) => {
-        // Add columns, indexes, foreign keys here
-    });
-};
-
-module.exports.down = async function (schema: MigrationSchema, _query: QueryFn) {
-    return schema.alterTable('${table}', (table: TableBuilder) => {
-        // Reverse operations here
-    });
-};
+    /**
+     * Reverse the migrations.
+     */
+    async down(schema: MigrationSchema, query?: QueryFn): Promise<any> {
+        return schema.createTable('${tbl}', (table: TableBuilder) => {
+            table.increments('id');
+            // Add the columns that were in the original table
+            table.timestamps();
+        });
+    }
+}
 `;
         }
 
-        return `import type { MigrationSchema, TableBuilder } from '@/database';
+        if (action === 'alter') {
+            return `import type { Migration, MigrationSchema, TableBuilder, QueryFn } from '@/eloquent/Database/Schema';
 
-type QueryFn = (sql: string, params?: any[]) => Promise<any>;
+/**
+ * Migration: ${name}
+ * Alter table: ${tbl}
+ */
+export default class ${className} implements Migration {
+    /**
+     * Run the migrations.
+     */
+    async up(schema: MigrationSchema, query?: QueryFn): Promise<any> {
+        return schema.alterTable('${tbl}', (table: TableBuilder) => {
+            // Add a column:
+            // table.string('column_name', 255).nullable();
+            
+            // Add an index:
+            // table.index(['column_name']);
+            
+            // Add a foreign key:
+            // table.foreignKey('foreign_id', 'other_table', 'id', { onDelete: 'CASCADE' });
 
-// Migration: ${name}
-module.exports.up = async function (schema: MigrationSchema, _query: QueryFn) {
-    return schema.createTable('${tbl}', (table: TableBuilder) => {
-        table.increments('id');
-        table.timestamps();
-    });
-};
+            // Drop a column:
+            // table.dropColumn('column_name');
 
-module.exports.down = async function (schema: MigrationSchema, _query: QueryFn) {
-    return schema.dropTable('${tbl}');
-};
+            // Rename a column:
+            // table.renameColumn('old_name', 'new_name');
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    async down(schema: MigrationSchema, query?: QueryFn): Promise<any> {
+        return schema.alterTable('${tbl}', (table: TableBuilder) => {
+            // Reverse the operations performed in up()
+        });
+    }
+}
+`;
+        }
+
+        // Default: create table
+        return `import type { Migration, MigrationSchema, TableBuilder, QueryFn } from '@/eloquent/Database/Schema';
+
+/**
+ * Migration: ${name}
+ * Create table: ${tbl}
+ */
+export default class ${className} implements Migration {
+    /**
+     * Run the migrations.
+     */
+    async up(schema: MigrationSchema, query?: QueryFn): Promise<any> {
+        return schema.createTable('${tbl}', (table: TableBuilder) => {
+            table.increments('id');
+            
+            // Add your columns here
+            // table.string('name', 255).notNullable();
+            // table.text('description').nullable();
+            // table.unsignedBigInteger('user_id').notNullable();
+            
+            // Foreign keys
+            // table.foreignKey('user_id', 'users', 'id', { onDelete: 'CASCADE' });
+            
+            table.timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    async down(schema: MigrationSchema, query?: QueryFn): Promise<any> {
+        return schema.dropTable('${tbl}');
+    }
+}
 `;
     }
 }
-

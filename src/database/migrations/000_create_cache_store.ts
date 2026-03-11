@@ -1,4 +1,5 @@
-import type { MigrationSchema, TableBuilder } from '../Schema';
+import {MigrationSchema, TableBuilder} from "@/eloquent/Database";
+
 
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 

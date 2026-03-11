@@ -1,4 +1,4 @@
-import type { MigrationSchema, TableBuilder } from '../Schema';
+import {MigrationSchema, TableBuilder} from "@/eloquent/Database";
 import { RolesUsers } from '@/app/Models/User/RolesUsers';
 
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;

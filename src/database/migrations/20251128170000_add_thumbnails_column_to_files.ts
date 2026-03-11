@@ -1,4 +1,4 @@
-import type { MigrationSchema } from '../Schema';
+import {MigrationSchema} from "@/eloquent/Database";
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 // Migration: add thumbnails json column to files table (stores multi-size thumbnail paths)
 module.exports.up = async function (schema: MigrationSchema, _query: QueryFn) {

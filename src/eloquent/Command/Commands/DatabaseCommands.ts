@@ -1,6 +1,6 @@
 import { Command } from '@/eloquent/Command/Command';
 import { ArgumentsCamelCase } from 'yargs';
-import { runSeeders } from '@/database';
+import { runSeeders } from '@/eloquent/Database';
 import fs from 'fs';
 import path from 'path';
 
