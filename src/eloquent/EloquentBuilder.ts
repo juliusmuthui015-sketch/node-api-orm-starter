@@ -679,10 +679,56 @@ export class EloquentBuilder<T extends Model> {
     const tableName = (this.model as typeof Model).getTable();
     const prev = this.columnQualifier;
     this.columnQualifier = tableName; // qualify unqualified columns
+
+    // Handle DISTINCT for aggregate functions (e.g., COUNT(DISTINCT column))
+    const fn = functionName.toUpperCase();
+    const aggExpr = this.distinctValue && column !== '*'
+      ? `${fn}(DISTINCT ${column})`
+      : `${fn}(${column})`;
+
+    // Build the query parts similar to executeQuery
+    const parts: string[] = [`SELECT ${aggExpr} as agg FROM ${tableName}`];
+    const params: any[] = [];
+
+    // Add joins
+    this.joinClauses.forEach((join) => {
+      parts.push(
+        `${join.type.toUpperCase()} JOIN ${join.table} ON ${join.first} ${join.operator} ${join.second}`,
+      );
+    });
+
+    // Add where clause
     const where = this.buildWhereClause();
     this.columnQualifier = prev;
-    const sql = `SELECT ${functionName.toUpperCase()}(${column}) as agg FROM ${tableName}${where.sql}`;
-    const rows = await this.runQuery<any>(sql, where.params);
+    if (where.sql) {
+      parts.push(where.sql);
+      params.push(...where.params);
+    }
+
+    // Add has conditions (whereHas / whereDoesntHave)
+    const hasSql = this.buildHasConditionsSQL(tableName);
+    if (hasSql.sql) {
+      if (!where.sql) {
+        parts.push('WHERE 1=1');
+      }
+      parts.push(hasSql.sql);
+      params.push(...hasSql.params);
+    }
+
+    // Add group by (if set, aggregate will be per-group; this returns the first one)
+    if (this.groupByColumns.length > 0) {
+      parts.push(`GROUP BY ${this.groupByColumns.join(', ')}`);
+    }
+
+    // Add having
+    if (this.havingClauses.length > 0) {
+      const havingParts = this.havingClauses.map((h) => `${h.column} ${h.operator} ?`);
+      parts.push(`HAVING ${havingParts.join(' AND ')}`);
+      params.push(...this.havingClauses.map((h) => h.value));
+    }
+
+    const sql = parts.join(' ');
+    const rows = await this.runQuery<any>(sql, params);
     return rows[0]?.agg || '0';
   }
 
@@ -2242,7 +2288,118 @@ export class EloquentBuilder<T extends Model> {
     const filter = this.buildMongoFilter();
     const sessionOpts = this.getMongoSessionOptions();
     const field = this.normalizeField(column);
+    const key = fn.toLowerCase();
+
+    // Handle hasConditions (whereHas/whereDoesntHave) - requires in-memory filtering
+    if (this.hasConditions.length) {
+      // When whereHas/whereDoesntHave exist, fetch ALL fields so we can access foreign keys
+      let cursor = c.find(filter, sessionOpts);
+
+      // Apply sorting if specified (for consistent results)
+      if (this.orderByColumn) {
+        cursor = cursor.sort({
+          [this.normalizeField(this.orderByColumn)]: this.orderByDirection === 'asc' ? 1 : -1,
+        });
+      }
+
+      let docs = await cursor.toArray();
+      docs = docs.map((d) => {
+        if (d && d._id && !('id' in d)) d.id = String(d._id);
+        return d;
+      });
+
+      // Apply whereHas/whereDoesntHave filtering
+      const kept = await this.applyHasConditionsMongo(docs);
+
+      // Handle distinct
+      let values: any[];
+      if (this.distinctValue && column !== '*') {
+        const uniqueVals = new Set(kept.map((d: any) => d[field]));
+        values = Array.from(uniqueVals).map((v) => (typeof v === 'number' ? v : Number(v) || 0));
+      } else {
+        values = kept.map((d: any) => Number(d[field]) || 0);
+      }
+
+      if (key === 'count') {
+        return String(this.distinctValue && column !== '*' ? values.length : kept.length);
+      }
+
+      // Calculate aggregate manually from filtered docs
+      if (!values.length) return '0';
+      switch (key) {
+        case 'sum':
+          return String(values.reduce((a, b) => a + b, 0));
+        case 'avg':
+          return String(values.reduce((a, b) => a + b, 0) / values.length);
+        case 'max':
+          return String(Math.max(...values));
+        case 'min':
+          return String(Math.min(...values));
+        default:
+          return '0';
+      }
+    }
+
+    // No hasConditions - use native aggregation pipeline
     const pipeline: any[] = [{ $match: filter }];
+
+    // Handle groupBy columns
+    if (this.groupByColumns.length > 0) {
+      const groupId: any = {};
+      this.groupByColumns.forEach((col) => {
+        const normalizedCol = this.normalizeField(col);
+        groupId[normalizedCol] = `$${normalizedCol}`;
+      });
+
+      const aggOp: any = {
+        count: { $sum: 1 },
+        sum: { $sum: `$${field}` },
+        avg: { $avg: `$${field}` },
+        max: { $max: `$${field}` },
+        min: { $min: `$${field}` },
+      };
+
+      pipeline.push({ $group: { _id: groupId, agg: aggOp[key] || { $sum: 1 } } });
+
+      // Handle having clauses
+      if (this.havingClauses.length > 0) {
+        const havingMatch: any = {};
+        this.havingClauses.forEach((h) => {
+          const col = h.column === 'agg' ? 'agg' : this.normalizeField(h.column);
+          const op = (h.operator || '=').toLowerCase();
+          switch (op) {
+            case '=':
+              havingMatch[col] = h.value;
+              break;
+            case '>':
+              havingMatch[col] = { $gt: h.value };
+              break;
+            case '>=':
+              havingMatch[col] = { $gte: h.value };
+              break;
+            case '<':
+              havingMatch[col] = { $lt: h.value };
+              break;
+            case '<=':
+              havingMatch[col] = { $lte: h.value };
+              break;
+            case '!=':
+            case '<>':
+              havingMatch[col] = { $ne: h.value };
+              break;
+          }
+        });
+        if (Object.keys(havingMatch).length > 0) {
+          pipeline.push({ $match: havingMatch });
+        }
+      }
+
+      // Return first group result
+      const res = await c.aggregate(pipeline, sessionOpts).toArray();
+      return String(res[0]?.agg ?? 0);
+    }
+
+    // Simple aggregation without groupBy
     const map: any = {
       count: { $sum: 1 },
       sum: { $sum: `$${field}` },
@@ -2250,8 +2407,19 @@ export class EloquentBuilder<T extends Model> {
       max: { $max: `$${field}` },
       min: { $min: `$${field}` },
     };
-    const key = fn.toLowerCase();
-    if (key === 'count') return String(await c.countDocuments(filter, sessionOpts));
+
+    // Handle count with distinctValue
+    if (key === 'count') {
+      if (this.distinctValue && column !== '*') {
+        // Count distinct values
+        pipeline.push({ $group: { _id: `$${field}` } });
+        pipeline.push({ $count: 'agg' });
+        const res = await c.aggregate(pipeline, sessionOpts).toArray();
+        return String(res[0]?.agg ?? 0);
+      }
+      return String(await c.countDocuments(filter, sessionOpts));
+    }
+
     pipeline.push({ $group: { _id: null, agg: map[key] } });
     const res = await c.aggregate(pipeline, sessionOpts).toArray();
     return String(res[0]?.agg ?? 0);

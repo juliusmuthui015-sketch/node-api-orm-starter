@@ -1,4 +1,6 @@
 import { EventEmitter } from 'events';
+import parser from 'cron-parser';
+import {Event as EloquentEvent, Listener, ListensTo, getEventDispatcher} from '@/eloquent/Core/Events';
 
 /*
 |--------------------------------------------------------------------------
@@ -25,6 +27,34 @@ export interface ScheduledTask {
     isRunning: boolean;
 }
 
+
+export function createObservableTask(task: ScheduledTask): ScheduledTask {
+    return new Proxy(task, {
+        set(target, prop, value) {
+            if (prop === 'expression' && target.expression !== value) {
+                target.expression = value;
+                // Calculate nextRun synchronously when expression changes
+                try {
+                    const interval = parser.parse(value, {
+                        tz: target.timezone || 'UTC',
+                    });
+                    target.nextRun = interval.next().toDate();
+                } catch (e) {
+                    // Invalid cron expression, leave nextRun undefined
+                }
+
+                // 🔥 fire event
+                new TaskExpressionChangedEvent(target).dispatchNow();
+
+
+                return true;
+            }
+
+            (target as any)[prop] = value;
+            return true;
+        }
+    });
+}
 export class Schedule {
     private tasks: ScheduledTask[] = [];
     private running: boolean = false;
@@ -40,7 +70,7 @@ export class Schedule {
      * Add a new scheduled task.
      */
     call(callback: () => Promise<void> | void): ScheduledTaskBuilder {
-        const task: ScheduledTask = {
+        const task: ScheduledTask = createObservableTask({
             name: `closure-${Date.now()}`,
             callback,
             expression: '* * * * *',
@@ -49,7 +79,7 @@ export class Schedule {
             evenInMaintenanceMode: false,
             runInBackground: false,
             isRunning: false,
-        };
+        });
 
         this.tasks.push(task);
         return new ScheduledTaskBuilder(task);
@@ -77,7 +107,7 @@ export class Schedule {
             }
         };
 
-        const task: ScheduledTask = {
+        const task: ScheduledTask = createObservableTask({
             name: `command:${command}`,
             callback,
             expression: '* * * * *',
@@ -87,10 +117,18 @@ export class Schedule {
             evenInMaintenanceMode: false,
             runInBackground: false,
             isRunning: false,
-        };
+        });
 
         this.tasks.push(task);
         return new ScheduledTaskBuilder(task);
+    }
+
+    updateNextTaskRun(task: ScheduledTask) {
+        const interval = parser.parse(task.expression, {
+            tz: task.timezone || 'UTC',
+        });
+
+        task.nextRun = interval.next().toDate();
     }
 
     /**
@@ -114,7 +152,7 @@ export class Schedule {
             }
         };
 
-        const task: ScheduledTask = {
+        const task: ScheduledTask = createObservableTask({
             name: `exec:${command.slice(0, 50)}`,
             callback,
             expression: '* * * * *',
@@ -124,7 +162,7 @@ export class Schedule {
             evenInMaintenanceMode: false,
             runInBackground: false,
             isRunning: false,
-        };
+        });
 
         this.tasks.push(task);
         return new ScheduledTaskBuilder(task);
@@ -145,7 +183,7 @@ export class Schedule {
             await pending.dispatch();
         };
 
-        const task: ScheduledTask = {
+        const task: ScheduledTask = createObservableTask({
             name: `job:${(JobClass as any).name || 'anonymous'}`,
             callback,
             expression: '* * * * *',
@@ -155,7 +193,7 @@ export class Schedule {
             evenInMaintenanceMode: false,
             runInBackground: false,
             isRunning: false,
-        };
+        });
 
         this.tasks.push(task);
         return new ScheduledTaskBuilder(task);
@@ -263,6 +301,7 @@ export class Schedule {
     private async runTask(task: ScheduledTask): Promise<void> {
         task.isRunning = true;
         task.lastRun = new Date();
+        this.updateNextTaskRun(task)
 
         console.log(`[Scheduler] Running task: ${task.name}`);
         this.events.emit('task:start', task);
@@ -364,8 +403,34 @@ export class Schedule {
 |
 */
 
+export class TaskExpressionChangedEvent extends EloquentEvent{
+    constructor(public readonly task: ScheduledTask) {
+        super();
+    }
+
+    eventName(): string {
+        return 'task:expression-changed';
+    }
+}
+
+@ListensTo(['task:expression-changed'])
+export class TaskExpressionChangedListener extends Listener {
+    handle(payload: TaskExpressionChangedEvent): void | Promise<void> {
+        const task = payload.task;
+
+        const interval = parser.parse(task.expression, {
+            tz: task.timezone || 'UTC',
+        });
+
+        task.nextRun = interval.next().toDate();
+    }
+
+}
+
 export class ScheduledTaskBuilder {
-    constructor(private task: ScheduledTask) {}
+    constructor(private task: ScheduledTask) {
+        // this.task = createObservableTask(this.task);
+    }
 
     /*
     |--------------------------------------------------------------------------
@@ -699,4 +764,10 @@ export class ScheduledTaskBuilder {
 
 // Export a singleton instance
 export const scheduler = new Schedule();
+
+// Register the TaskExpressionChangedListener immediately so it's available
+// before any tasks are created (decorators only register metadata, not the actual listener)
+getEventDispatcher().listen('task:expression-changed', (payload: TaskExpressionChangedEvent) => {
+    new TaskExpressionChangedListener().handle(payload);
+});
 
