@@ -25,6 +25,7 @@ import { RouteServiceProvider } from '@/app/Providers/RouteServiceProvider';
 import { DatabaseServiceProvider } from '@/app/Providers/DatabaseServiceProvider';
 import { CacheServiceProvider } from '@/app/Providers/CacheServiceProvider';
 import { Kernel as HttpKernel } from '@/app/Http/Kernel';
+import { getBroadcastManager } from '@/eloquent/Core/Broadcasting';
 
 // Create the application instance
 export const app = new Application(container);
@@ -103,10 +104,29 @@ export async function startApplication(): Promise<void> {
         // Configure error handling (must be after routes)
         kernel.configureErrorHandling();
 
+        // Create HTTP server (needed for WebSocket support)
+        const httpServer = app.createHttpServer();
+
+        // Initialize broadcasting/WebSocket if enabled
+        const broadcastDriver = process.env.BROADCAST_DRIVER || 'null';
+        if (broadcastDriver !== 'null') {
+            const broadcastManager = getBroadcastManager();
+            broadcastManager.setHttpServer(httpServer);
+            await broadcastManager.initialize();
+
+            // Load channel definitions
+            await require('@/routes/channels');
+
+            console.log(`📡 Broadcasting enabled with driver: ${broadcastDriver}`);
+        }
+
         // Start the server
         app.listen(PORT, () => {
             console.log(`🚀 Server running on port ${PORT}`);
             console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+            if (broadcastDriver !== 'null') {
+                console.log(`🔌 WebSocket available at ws://localhost:${PORT}/ws`);
+            }
         });
 
     } catch (error) {
