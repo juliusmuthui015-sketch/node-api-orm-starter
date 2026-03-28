@@ -26,6 +26,7 @@ export type HandlerOrAlias =
 export type GroupOptions = {
   prefix?: string;
   middleware?: RequestHandler | RequestHandler[] | string | string[];
+  withoutMiddleware?: RequestHandler | RequestHandler[] | string | string[];
   name?: string;
   where?: Record<string, string | RegExp>;
 };
@@ -35,7 +36,11 @@ export type PrefixFluent = {
   middleware(
     mw: RequestHandler | RequestHandler[] | string | string[],
     cb?: (rb: RouterBuilder) => void,
-  ): RouterBuilder | { group(cb: (rb: RouterBuilder) => void): RouterBuilder };
+  ): RouterBuilder | { group(cb: (rb: RouterBuilder) => void): RouterBuilder; withoutMiddleware(mw: RequestHandler | RequestHandler[] | string | string[]): { group(cb: (rb: RouterBuilder) => void): RouterBuilder } };
+  withoutMiddleware(
+    mw: RequestHandler | RequestHandler[] | string | string[],
+    cb?: (rb: RouterBuilder) => void,
+  ): RouterBuilder | { group(cb: (rb: RouterBuilder) => void): RouterBuilder; middleware(mw: RequestHandler | RequestHandler[] | string | string[]): { group(cb: (rb: RouterBuilder) => void): RouterBuilder } };
   group(cb: (rb: RouterBuilder) => void): RouterBuilder;
   name(name: string): PrefixFluent;
 };
@@ -144,6 +149,7 @@ export class RouterBuilder {
   private router: Router;
   private prefixStack: string[] = [''];
   private middlewareStack: RequestHandler[][] = [[]];
+  private withoutMiddlewareStack: (string | RequestHandler)[][] = [[]];
   private nameStack: string[] = [''];
   private whereStack: RouteParameterConstraints[] = [{}];
   private namedRoutes: Map<string, NamedRoute> = new Map();
@@ -201,7 +207,38 @@ export class RouterBuilder {
   }
 
   private currentMiddlewares(): RequestHandler[] {
-    return this.middlewareStack.reduce<RequestHandler[]>((acc, cur) => acc.concat(cur || []), []);
+    const excluded = this.withoutMiddlewareStack.reduce<(string | RequestHandler)[]>((acc, cur) => acc.concat(cur || []), []);
+    const all = this.middlewareStack.reduce<RequestHandler[]>((acc, cur) => acc.concat(cur || []), []);
+
+    if (excluded.length === 0) {
+      return all;
+    }
+
+    return all.filter(mw => {
+      // Check if this middleware should be excluded
+      return !excluded.some(ex => {
+        if (typeof ex === 'string') {
+          // Compare by name/alias - need to resolve the string first
+          try {
+            const resolved = resolveMiddleware(ex);
+            if (Array.isArray(resolved)) {
+              return resolved.includes(mw);
+            }
+            return resolved === mw;
+          } catch {
+            return false;
+          }
+        }
+        return ex === mw;
+      });
+    });
+  }
+
+  /**
+   * Get the current excluded middleware stack.
+   */
+  private currentExcludedMiddlewares(): (string | RequestHandler)[] {
+    return this.withoutMiddlewareStack.reduce<(string | RequestHandler)[]>((acc, cur) => acc.concat(cur || []), []);
   }
 
   // Helper to detect ES6 class constructors vs plain functions
@@ -280,6 +317,13 @@ export class RouterBuilder {
         : [options.middleware]
       : [];
 
+    // Handle withoutMiddleware
+    const excluded = options.withoutMiddleware
+      ? Array.isArray(options.withoutMiddleware)
+        ? options.withoutMiddleware
+        : [options.withoutMiddleware]
+      : [];
+
     // resolve middleware strings to request handlers
     const mw: RequestHandler[] = [];
     for (const r of raw) {
@@ -298,6 +342,7 @@ export class RouterBuilder {
 
     this.prefixStack.push(prefix);
     this.middlewareStack.push(mw);
+    this.withoutMiddlewareStack.push(excluded as (string | RequestHandler)[]);
     this.nameStack.push(newName);
     this.whereStack.push(constraints);
 
@@ -306,6 +351,7 @@ export class RouterBuilder {
     } finally {
       this.prefixStack.pop();
       this.middlewareStack.pop();
+      this.withoutMiddlewareStack.pop();
       this.nameStack.pop();
       this.whereStack.pop();
     }
@@ -708,6 +754,37 @@ export class RouterBuilder {
           name(name: string) {
             return self.prefix(prefix).name(name);
           },
+          withoutMiddleware(excluded: RequestHandler | RequestHandler[] | string | string[]) {
+            return {
+              group(cb2: (rb: RouterBuilder) => void) {
+                self.group({ prefix, middleware: mw as any, withoutMiddleware: excluded as any }, cb2);
+                return self;
+              },
+            };
+          },
+        } as any;
+      },
+      withoutMiddleware(
+        mw: RequestHandler | RequestHandler[] | string | string[],
+        cb?: (rb: RouterBuilder) => void,
+      ) {
+        if (cb) {
+          self.group({ prefix, withoutMiddleware: mw as any }, cb);
+          return self;
+        }
+        return {
+          group(cb2: (rb: RouterBuilder) => void) {
+            self.group({ prefix, withoutMiddleware: mw as any }, cb2);
+            return self;
+          },
+          middleware(included: RequestHandler | RequestHandler[] | string | string[]) {
+            return {
+              group(cb2: (rb: RouterBuilder) => void) {
+                self.group({ prefix, middleware: included as any, withoutMiddleware: mw as any }, cb2);
+                return self;
+              },
+            };
+          },
         } as any;
       },
       group(cb: (rb: RouterBuilder) => void) {
@@ -738,6 +815,51 @@ export class RouterBuilder {
       name(name: string) {
         self.currentRouteName = name;
         return self;
+      },
+      withoutMiddleware(excluded: RequestHandler | RequestHandler[] | string | string[]) {
+        return {
+          group(cb2: (rb: RouterBuilder) => void) {
+            self.group({ middleware: mw as any, withoutMiddleware: excluded as any }, cb2);
+            return self;
+          },
+        };
+      },
+    };
+  }
+
+  /**
+   * Exclude middleware for a route group.
+   *
+   * @example
+   * rb.middleware('auth').withoutMiddleware('csrf').group((r) => {
+   *   r.post('/webhook', WebhookController.handle);
+   * });
+   *
+   * rb.withoutMiddleware(['auth', 'csrf']).group((r) => {
+   *   r.get('/health', HealthController.check);
+   * });
+   */
+  withoutMiddleware(
+    mw: RequestHandler | RequestHandler[] | string | string[],
+    cb?: (rb: RouterBuilder) => void,
+  ): any {
+    if (cb) {
+      this.group({ withoutMiddleware: mw as any }, cb);
+      return this;
+    }
+    const self = this;
+    return {
+      group(cb2: (rb: RouterBuilder) => void) {
+        self.group({ withoutMiddleware: mw as any }, cb2);
+        return self;
+      },
+      middleware(included: RequestHandler | RequestHandler[] | string | string[]) {
+        return {
+          group(cb2: (rb: RouterBuilder) => void) {
+            self.group({ middleware: included as any, withoutMiddleware: mw as any }, cb2);
+            return self;
+          },
+        };
       },
     };
   }
