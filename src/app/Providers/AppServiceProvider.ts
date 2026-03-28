@@ -7,6 +7,7 @@ import {RouteServiceProvider} from "@/app";
 import {QueueServiceProvider} from "@app/Providers/QueueServiceProvider";
 import {EventServiceProvider} from "@app/Providers/EventServiceProvider";
 import {BroadcastServiceProvider} from "@app/Providers/BroadcastServiceProvider";
+import MiddlewareServiceProvider from "@app/Providers/MiddlewareServiceProvider";
 
 export class AppServiceProvider extends ServiceProvider {
     /*
@@ -21,6 +22,7 @@ export class AppServiceProvider extends ServiceProvider {
     protected additionalProviders: ServiceProviderClass[] = [
         DatabaseServiceProvider,
         CacheServiceProvider,
+        MiddlewareServiceProvider,
         RouteServiceProvider,
         QueueServiceProvider,
         EventServiceProvider,
