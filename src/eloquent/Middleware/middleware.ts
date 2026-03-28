@@ -1,11 +1,14 @@
-import { RequestHandler } from 'express';
+import {NextFunction, RequestHandler} from 'express';
+import { middlewareStack, MiddlewareStack, Middleware, MiddlewareInterface, MiddlewareGroupConfig } from './MiddlewareStack';
 
-type MiddlewareEntry = RequestHandler | ((...args: any[]) => RequestHandler);
+export type MiddlewareEntry = RequestHandler | ((...args: any[]) => RequestHandler);
 
 const registry: Record<string, MiddlewareEntry> = {};
 
 export function registerMiddleware(name: string, entry: MiddlewareEntry) {
   registry[name] = entry;
+  // Also register with the new stack system
+  middlewareStack.alias(name, entry);
 }
 
 export function getRegisteredMiddleware(): Record<string, MiddlewareEntry> {
@@ -13,7 +16,14 @@ export function getRegisteredMiddleware(): Record<string, MiddlewareEntry> {
 }
 
 export function hasMiddleware(name: string): boolean {
-  return name in registry;
+  return name in registry || middlewareStack.hasAlias(name) || middlewareStack.hasGroup(name);
+}
+
+/**
+ * Get the middleware stack instance.
+ */
+export function getMiddlewareStack(): MiddlewareStack {
+  return middlewareStack;
 }
 
 export function resolveMiddleware(
@@ -22,8 +32,21 @@ export function resolveMiddleware(
   if (typeof mw === 'function') return mw;
   if (Array.isArray(mw)) return mw.map((m) => resolveMiddleware(m) as RequestHandler);
 
-  // string -> maybe 'auth' or 'can:view_users' or 'role:admin'
+  // string -> maybe 'auth' or 'can:view_users' or 'role:admin' or a group like 'web'
   const [key, rest] = (mw as string).split(':');
+
+  // Try the new MiddlewareStack first for groups
+  if (middlewareStack.hasGroup(key) && rest === undefined) {
+    return middlewareStack.getResolvedGroup(key);
+  }
+
+  // Try the new MiddlewareStack for aliases
+  if (middlewareStack.hasAlias(key)) {
+    const args = rest ? rest.split(',').map((s) => s.trim()) : [];
+    return middlewareStack.resolve(middlewareStack.getAlias(key)!, args) as RequestHandler | RequestHandler[];
+  }
+
+  // Fall back to legacy registry
   if (rest !== undefined && rest.split(',').length > 0) {
     const args = rest ? rest.split(',').map((s) => s.trim()) : [];
     const factory = registry[key] as any;
@@ -55,3 +78,6 @@ export function resolveMiddleware(
 
   throw new Error(`Unknown middleware: ${String(mw)}`);
 }
+// Re-export from MiddlewareStack
+export { MiddlewareStack, Middleware, MiddlewareInterface, MiddlewareGroupConfig, middlewareStack };
+
