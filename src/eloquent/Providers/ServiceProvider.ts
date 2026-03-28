@@ -1,4 +1,10 @@
 import { Application } from "@/app/Providers/Application";
+import {
+    registerMiddleware,
+    middlewareStack,
+    MiddlewareEntry,
+    Middleware
+} from "@/eloquent/Middleware/middleware";
 
 export type ServiceProviderClass = new (app: Application) => ServiceProvider;
 
@@ -106,6 +112,120 @@ export abstract class ServiceProvider {
         for (const callback of this.bootedCallbacks) {
             await callback();
         }
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Middleware Registration (Laravel-style)
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * Register a middleware alias.
+     *
+     * @example
+     * this.middlewareAlias('auth', authMiddleware);
+     * this.middlewareAlias('can', (...perms) => authorizePermissions(...perms));
+     */
+    protected middlewareAlias(name: string, middleware: MiddlewareEntry | Middleware): this {
+        middlewareStack.alias(name, middleware as any);
+        registerMiddleware(name, middleware as MiddlewareEntry);
+        return this;
+    }
+
+    /**
+     * Register multiple middleware aliases at once.
+     *
+     * @example
+     * this.middlewareAliases({
+     *   'auth': authMiddleware,
+     *   'can': (...perms) => authorizePermissions(...perms),
+     *   'role': (...roles) => authorizeRoles(...roles),
+     * });
+     */
+    protected middlewareAliases(aliases: Record<string, MiddlewareEntry | Middleware>): this {
+        for (const [name, middleware] of Object.entries(aliases)) {
+            this.middlewareAlias(name, middleware);
+        }
+        return this;
+    }
+
+    /**
+     * Define a middleware group.
+     *
+     * @example
+     * this.middlewareGroup('api', [throttleMiddleware, 'auth']);
+     */
+    protected middlewareGroup(name: string, middleware: (string | MiddlewareEntry | Middleware)[]): this {
+        middlewareStack.group(name, middleware as any);
+        return this;
+    }
+
+    /**
+     * Append middleware to a group.
+     *
+     * @example
+     * this.appendMiddlewareToGroup('api', rateLimitMiddleware);
+     */
+    protected appendMiddlewareToGroup(groupName: string, middleware: string | MiddlewareEntry | Middleware): this {
+        middlewareStack.appendToGroup(groupName, middleware as any);
+        return this;
+    }
+
+    /**
+     * Prepend middleware to a group.
+     *
+     * @example
+     * this.prependMiddlewareToGroup('api', securityMiddleware);
+     */
+    protected prependMiddlewareToGroup(groupName: string, middleware: string | MiddlewareEntry | Middleware): this {
+        middlewareStack.prependToGroup(groupName, middleware as any);
+        return this;
+    }
+
+    /**
+     * Remove middleware from a group.
+     *
+     * @example
+     * this.removeMiddlewareFromGroup('web', csrfMiddleware);
+     */
+    protected removeMiddlewareFromGroup(groupName: string, middleware: string | MiddlewareEntry | Middleware): this {
+        middlewareStack.removeFromGroup(groupName, middleware as any);
+        return this;
+    }
+
+    /**
+     * Set middleware priority order.
+     *
+     * @example
+     * this.middlewarePriority(['auth', 'can', 'role']);
+     */
+    protected middlewarePriority(priority: string[]): this {
+        middlewareStack.setPriority(priority);
+        return this;
+    }
+
+    /**
+     * Mark middleware as singleton (only instantiated once).
+     *
+     * @example
+     * this.singletonMiddleware(ExpensiveMiddleware);
+     */
+    protected singletonMiddleware(middleware: string | Middleware): this {
+        middlewareStack.singleton(middleware as any);
+        return this;
+    }
+
+    /**
+     * Get the middleware stack for advanced configuration.
+     *
+     * @example
+     * this.middleware()
+     *   .alias('custom', customMiddleware)
+     *   .group('admin', ['auth', 'role:admin']);
+     */
+    protected middleware(): typeof middlewareStack {
+        return middlewareStack;
     }
 
     /*
