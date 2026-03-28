@@ -3,6 +3,16 @@ import path from 'path';
 import crypto from 'crypto';
 import CacheModel from '@/app/Models/Cache/Cache';
 
+// Re-export rate limiter
+export {
+  RateLimiter,
+  RateLimiterFacade,
+  RateLimitExceededException,
+  defineRateLimiter,
+  getNamedLimiter,
+} from './RateLimiter';
+export type { RateLimiterConfig, RateLimitInfo } from './RateLimiter';
+
 export interface CacheDriver {
   init(): Promise<void>;
   get(key: string): Promise<any | null>;
