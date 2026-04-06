@@ -49,8 +49,8 @@ export abstract class ServiceProvider {
      */
     abstract register(): void;
 
-    singleton(abstract: Abstract<unknown>,
-              concrete?: any,) {
+    singleton<T>(abstract: Abstract<T>,
+              concrete: any = abstract) {
         this.container.singleton(abstract,concrete)
     }
 
