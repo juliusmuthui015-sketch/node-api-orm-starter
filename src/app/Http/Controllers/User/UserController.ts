@@ -106,7 +106,7 @@ export default {
           { ...(profileData ?? {}) },
           {
             gender: 'nullable|string|in:male,female',
-            type: 'nullable|string|max:50|in:admin,user',
+            type: 'nullable|string|max:50|in:admin,user,staff,agent',
             id_number: 'nullable|string|max:100',
             city: 'nullable|string|max:100',
             country: 'nullable|string|max:100',
@@ -171,7 +171,7 @@ export default {
   async updateProfile(req: Request, res: Response) {
     const rules: any = {
       gender: 'nullable|string|in:male,female',
-      type: 'nullable|string|max:50|in:admin,user',
+      type: 'nullable|string|max:50|in:admin,staff,user,agent',
       id_number: 'nullable|string|max:100',
       city: 'nullable|string|max:100',
       country: 'nullable|string|max:100',
