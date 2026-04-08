@@ -106,7 +106,9 @@ function decryptRaw(payloadStr: string): string | null {
   return decrypted.toString('utf8');
 }
 
-const CACHE_PREFIX = process.env.CACHE_PREFIX ? String(process.env.CACHE_PREFIX) : '';
+const CACHE_PREFIX = process.env.CACHE_PREFIX
+    ? String(process.env.CACHE_PREFIX)
+    : (process.env.APP_NAME || 'app');
 function prefixed(key: string) {
   if (!CACHE_PREFIX) return key;
   return `${CACHE_PREFIX}:${key}`;
@@ -394,14 +396,18 @@ class RedisCache implements CacheDriver {
 
   async clear() {
     await this.init();
-    // FLUSHDB may be dangerous in shared environments — use with caution
-    if (typeof this.client.flushDb === 'function') {
-      await this.client.flushDb();
-    } else if (typeof this.client.flushdb === 'function') {
-      await this.client.flushdb();
-    } else {
-      throw new Error('Redis client does not support flushDb/flushdb for clearing cache');
-    }
+    // Use SCAN + DEL scoped to our prefix instead of FLUSHDB
+    // FLUSHDB is dangerous in shared Redis environments as it wipes ALL keys
+    const pattern = CACHE_PREFIX ? `${CACHE_PREFIX}:*` : '*';
+    let cursor = '0';
+    do {
+      const res = await this.client.scan(cursor, { MATCH: pattern, COUNT: 200 });
+      cursor = res.cursor || res[0];
+      const keys = res.keys || res[1];
+      if (keys.length > 0) {
+        await this.client.del(keys);
+      }
+    } while (cursor !== '0' && String(cursor) !== '0');
   }
 
   async keys() {

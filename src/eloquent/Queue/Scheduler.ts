@@ -1,6 +1,33 @@
 import { EventEmitter } from 'events';
 import parser from 'cron-parser';
 import {Event as EloquentEvent, Listener, ListensTo, getEventDispatcher} from '@/eloquent/Core/Events';
+import { Cache } from '@/cache';
+
+/*
+|--------------------------------------------------------------------------
+| Distributed Lock Helpers
+|--------------------------------------------------------------------------
+|
+| Used by onOneServer / withoutOverlapping to ensure only one
+| instance of a scheduled task runs across all servers sharing
+| the same cache (Redis / DB).
+|
+*/
+
+const SCHEDULER_LOCK_PREFIX = `${process.env.APP_NAME || 'app'}:scheduler:lock`;
+
+async function acquireLock(key: string, ttlSeconds: number): Promise<boolean> {
+    const lockKey = `${SCHEDULER_LOCK_PREFIX}:${key}`;
+    const existing = await Cache.get(lockKey);
+    if (existing) return false; // lock held by another instance
+    await Cache.set(lockKey, Date.now(), ttlSeconds);
+    return true;
+}
+
+async function releaseLock(key: string): Promise<void> {
+    const lockKey = `${SCHEDULER_LOCK_PREFIX}:${key}`;
+    await Cache.del(lockKey);
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -287,8 +314,27 @@ export class Schedule {
         for (const task of dueTasks) {
             // Skip if task is already running and withoutOverlapping is enabled
             if (task.withoutOverlapping && task.isRunning) {
-                console.log(`[Scheduler] Skipping overlapping task: ${task.name}`);
+                console.log(`[Scheduler] Skipping overlapping task (in-memory): ${task.name}`);
                 continue;
+            }
+
+            // Distributed withoutOverlapping check via cache lock
+            if (task.withoutOverlapping) {
+                const lockAcquired = await acquireLock(`overlap:${task.name}`, 300).catch(() => false);
+                if (!lockAcquired) {
+                    console.log(`[Scheduler] Skipping overlapping task (distributed lock): ${task.name}`);
+                    continue;
+                }
+            }
+
+            // Distributed onOneServer check via cache lock
+            if (task.onOneServer) {
+                // Lock for ~60 seconds (one cron tick) so only one server picks it up
+                const lockAcquired = await acquireLock(`once:${task.name}:${Math.floor(Date.now() / 60000)}`, 65).catch(() => false);
+                if (!lockAcquired) {
+                    console.log(`[Scheduler] Skipping task (onOneServer, another instance has it): ${task.name}`);
+                    continue;
+                }
             }
 
             await this.runTask(task);
@@ -317,6 +363,9 @@ export class Schedule {
                         this.events.emit('task:failed', task, error);
                     } finally {
                         task.isRunning = false;
+                        if (task.withoutOverlapping) {
+                            await releaseLock(`overlap:${task.name}`).catch(() => {});
+                        }
                     }
                 });
             } else {
@@ -329,6 +378,9 @@ export class Schedule {
         } finally {
             if (!task.runInBackground) {
                 task.isRunning = false;
+                if (task.withoutOverlapping) {
+                    await releaseLock(`overlap:${task.name}`).catch(() => {});
+                }
             }
         }
     }

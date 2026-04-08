@@ -23,7 +23,9 @@ export class RedisDriver implements QueueDriverInterface {
         const redisConfig = queueConfig.connections.redis;
         this.defaultQueue = config?.queue || redisConfig.queue || 'default';
         this.retryAfter = config?.retry_after || redisConfig.retry_after || 90;
-        this.prefix = config?.prefix || process.env.REDIS_PREFIX || 'rentivo_queue';
+        // Derive prefix from APP_NAME for multi-app isolation on shared Redis
+        const appName = process.env.APP_NAME || 'app';
+        this.prefix = config?.prefix || process.env.REDIS_PREFIX || `${appName}_queue`;
     }
 
     /**

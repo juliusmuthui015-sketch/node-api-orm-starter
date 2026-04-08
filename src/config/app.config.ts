@@ -4,8 +4,9 @@ import path from 'path';
 // ensure .env loaded if this module is imported directly
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
+export const APP_NAME = process.env.APP_NAME || 'app';
 export const CACHE_DRIVER = (process.env.CACHE_DRIVER || 'file').toLowerCase();
-export const CACHE_PREFIX = process.env.CACHE_PREFIX || '';
+export const CACHE_PREFIX = process.env.CACHE_PREFIX || APP_NAME;
 export const SKIP_CACHE =
   String(process.env.SKIP_CACHE || '').toLowerCase() === '1' ||
   String(process.env.SKIP_CACHE || '').toLowerCase() === 'true';
@@ -24,6 +25,7 @@ export const DOCS_PATH = process.env.DOCS_PATH || '/docs';
 export const DOCS_THEME = process.env.DOCS_THEME || 'kepler';
 
 export default {
+  appName: APP_NAME,
   cache: {
     driver: CACHE_DRIVER,
     prefix: CACHE_PREFIX,
