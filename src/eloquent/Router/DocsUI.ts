@@ -60,11 +60,14 @@ export class DocsUI {
      * Express handler: serve the documentation HTML page.
      */
     static uiHandler(options?: { specUrl?: string; title?: string; theme?: 'default' | 'alternate' | 'moon' | 'purple' | 'solarized' | 'bluePlanet' | 'saturn' | 'kepler' | 'mars' | 'deepSpace' | 'none' }) {
-        const specUrl = options?.specUrl || '/docs/openapi.json';
         const title = options?.title || process.env.DOCS_TITLE || 'API Documentation';
         const theme = options?.theme || 'kepler';
 
-        return (_req: Request, res: Response) => {
+        return (req: Request, res: Response) => {
+            // Auto-detect spec URL from incoming request to handle reverse-proxy prefixes
+            // e.g. /backend/docs → /backend/docs/openapi.json
+            const autoSpecUrl = `${req.originalUrl.replace(/[?#].*$/, '').replace(/\/+$/, '')}/openapi.json`;
+            const specUrl = options?.specUrl || autoSpecUrl;
             const html = DocsUI.generateHTML(specUrl, title, theme);
             res.type('html').send(html);
         };

@@ -14,7 +14,6 @@ export class DocServiceProvider extends ServiceProvider {
         };
         expressApp.get(`${basePath}/openapi.json`, DocsUI.specHandler(specOptions));
         expressApp.get(basePath, DocsUI.uiHandler({
-            specUrl: `${basePath}/openapi.json`,
             title: specOptions.title,
             theme: (process.env.DOCS_THEME as any) || 'kepler',
         }));
