@@ -72,7 +72,7 @@ export class DocsUI {
                 ''
             ).replace(/\/+$/, '');
             const requestPath = req.originalUrl.replace(/[?#].*$/, '').replace(/\/+$/, '');
-            const autoSpecUrl = `${proxyPrefix}${requestPath}/openapi.json`;
+            const autoSpecUrl = (process.env.APP_URL || `${proxyPrefix}`).replace(/\/+$/, '')+`${requestPath}/openapi.json`;
             const specUrl = options?.specUrl || autoSpecUrl;
             const html = DocsUI.generateHTML(specUrl, title, theme);
             res.type('html').send(html);
