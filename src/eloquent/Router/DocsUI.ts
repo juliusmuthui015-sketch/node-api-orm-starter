@@ -64,9 +64,15 @@ export class DocsUI {
         const theme = options?.theme || 'kepler';
 
         return (req: Request, res: Response) => {
-            // Auto-detect spec URL from incoming request to handle reverse-proxy prefixes
-            // e.g. /backend/docs → /backend/docs/openapi.json
-            const autoSpecUrl = `${req.originalUrl.replace(/[?#].*$/, '').replace(/\/+$/, '')}/openapi.json`;
+            // Detect reverse-proxy prefix (e.g. Nginx proxying /backend → localhost:3000)
+            // Priority: X-Forwarded-Prefix header → APP_BASE_PATH env → empty
+            const proxyPrefix = (
+                (req.headers['x-forwarded-prefix'] as string) ||
+                process.env.APP_BASE_PATH ||
+                ''
+            ).replace(/\/+$/, '');
+            const requestPath = req.originalUrl.replace(/[?#].*$/, '').replace(/\/+$/, '');
+            const autoSpecUrl = `${proxyPrefix}${requestPath}/openapi.json`;
             const specUrl = options?.specUrl || autoSpecUrl;
             const html = DocsUI.generateHTML(specUrl, title, theme);
             res.type('html').send(html);
