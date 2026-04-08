@@ -12,6 +12,17 @@ export const SKIP_CACHE =
 
 export const APP_KEY = process.env.APP_KEY || '';
 
+// Documentation configuration
+export const DOCS_ENABLED = (() => {
+  const flag = process.env.DOCS_ENABLED;
+  if (flag !== undefined) return flag.toLowerCase() === 'true' || flag === '1';
+  return process.env.NODE_ENV !== 'production';
+})();
+export const DOCS_TITLE = process.env.DOCS_TITLE || 'API Documentation';
+export const DOCS_VERSION = process.env.DOCS_VERSION || '1.0.0';
+export const DOCS_PATH = process.env.DOCS_PATH || '/docs';
+export const DOCS_THEME = process.env.DOCS_THEME || 'kepler';
+
 export default {
   cache: {
     driver: CACHE_DRIVER,
@@ -19,4 +30,11 @@ export default {
     skip: SKIP_CACHE,
   },
   appKey: APP_KEY,
+  docs: {
+    enabled: DOCS_ENABLED,
+    title: DOCS_TITLE,
+    version: DOCS_VERSION,
+    path: DOCS_PATH,
+    theme: DOCS_THEME,
+  },
 };
