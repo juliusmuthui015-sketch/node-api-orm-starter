@@ -21,7 +21,9 @@
     "cache:cli": "ts-node-dev -r tsconfig-paths/register --transpile-only src/artisan.ts cache:list",
     "cache:clear": "ts-node-dev -r tsconfig-paths/register --transpile-only src/artisan.ts cache:clear",
     "key:generate": "ts-node-dev -r tsconfig-paths/register --transpile-only src/artisan.ts key:generate",
-    "route:list": "ts-node-dev -r tsconfig-paths/register --transpile-only src/artisan.ts route:list"
+    "route:list": "ts-node-dev -r tsconfig-paths/register --transpile-only src/artisan.ts route:list",
+    "docs:generate": "ts-node-dev -r tsconfig-paths/register --transpile-only src/artisan.ts docs:generate",
+    "docs:routes": "ts-node-dev -r tsconfig-paths/register --transpile-only src/artisan.ts docs:routes"
   },
   "keywords": [],
   "author": "",
