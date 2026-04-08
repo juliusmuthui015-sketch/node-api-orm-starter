@@ -43,8 +43,16 @@ export class DocsUI {
      */
     static specHandler(options?: OpenApiGeneratorOptions) {
         return (_req: Request, res: Response) => {
-            const spec = DocsUI.getSpec(options);
-            res.json(spec);
+            try {
+                const spec = DocsUI.getSpec(options);
+                res.json(spec);
+            } catch (error: any) {
+                console.error('Failed to generate OpenAPI spec:', error.message);
+                res.status(500).json({
+                    error: 'Failed to generate OpenAPI specification',
+                    message: error.message,
+                });
+            }
         };
     }
 
@@ -66,6 +74,20 @@ export class DocsUI {
      * Generate the self-contained HTML page.
      */
     private static generateHTML(specUrl: string, title: string, theme: string): string {
+        const configuration = JSON.stringify({
+            theme,
+            layout: 'modern',
+            defaultHttpClient: {
+                targetKey: 'node',
+                clientKey: 'fetch',
+            },
+            hiddenClients: [],
+            searchHotKey: 'k',
+            metaData: {
+                title,
+            },
+        });
+
         return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -79,20 +101,8 @@ export class DocsUI {
 <body>
     <script
         id="api-reference"
-        data-url="${this.escapeHtml(specUrl)}"
-        data-configuration="${this.escapeHtml(JSON.stringify({
-            theme,
-            layout: 'modern',
-            defaultHttpClient: {
-                targetKey: 'node',
-                clientKey: 'fetch',
-            },
-            hiddenClients: [],
-            searchHotKey: 'k',
-            metaData: {
-                title,
-            },
-        }))}">
+        data-url="${specUrl}"
+        data-configuration='${configuration}'>
     </script>
     <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
 </body>

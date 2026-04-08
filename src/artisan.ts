@@ -12,14 +12,21 @@
 import 'dotenv/config';
 import '@/global/autoload';
 
-// Boot HTTP Kernel FIRST to register middleware (needed before routes are imported)
+// Boot Application with all service providers (middleware, routes, etc.)
 import { container } from '@/eloquent/Container/Container';
 import { Application } from '@/app/Providers/Application';
+import { AppServiceProvider } from '@/app/Providers/AppServiceProvider';
 import { Kernel as HttpKernel } from '@/app/Http/Kernel';
 
 const app = new Application(container);
+
+// Register AppServiceProvider FIRST – this cascades into MiddlewareServiceProvider
+// which registers aliases like 'auth', 'can', 'role', 'must-be-active', etc.
+app.register(AppServiceProvider);
+
+// Boot HTTP Kernel (global middleware, error handling)
 const httpKernel = new HttpKernel(app);
-httpKernel.boot(); // Registers middleware aliases like 'auth', 'can', 'role', etc.
+httpKernel.boot();
 
 // Now import the rest (Commands will import routes which need middleware registered)
 import yargs from 'yargs';
