@@ -153,7 +153,13 @@ export class RouterBuilder {
   private nameStack: string[] = [''];
   private whereStack: RouteParameterConstraints[] = [{}];
   private namedRoutes: Map<string, NamedRoute> = new Map();
-  private registeredRoutes: Array<{ method: string; path: string; name: string | null; middleware: string[] }> = [];
+  private registeredRoutes: Array<{
+    method: string;
+    path: string;
+    name: string | null;
+    middleware: string[];
+    controllerRef?: { controller: any; method?: string };
+  }> = [];
   private currentRouteName: string = '';
   private explicitBinders: Map<string, (value: string, route: any) => Promise<any>> = new Map();
   private fallbackHandler: FallbackHandler | null = null;
@@ -407,11 +413,13 @@ export class RouterBuilder {
 
     const middlewares = this.currentMiddlewares();
     const resolvedHandlers: Array<RequestHandler | ControllerMethod> = [];
+    let controllerRef: { controller: any; method?: string } | undefined;
 
     for (let h of handlers as any[]) {
       // Handle [ControllerClass, 'method'] or ControllerClass (if it has a handle method or similar)
       if (Array.isArray(h) && h.length === 2 && typeof h[0] === 'function') {
         const [ControllerClass, methodName] = h;
+        controllerRef = { controller: ControllerClass, method: String(methodName) };
         h = async (req: any, res: any, next: any, ...models: any[]) => {
           const controllerInstance = container.make<any>(ControllerClass);
           if (!controllerInstance[methodName]) {
@@ -426,9 +434,8 @@ export class RouterBuilder {
           return controllerInstance[methodName](req, res, ...models);
         };
       } else if (this.isClassConstructor(h)) {
-         // It's likely a class, we'll try to resolve it and call 'handle' or use it as is if it's already a handler
-         // Actually, usually in Laravel-style, if it's a class it might be a single-action controller (invokable)
          const ControllerClass = h;
+         controllerRef = { controller: ControllerClass, method: 'handle' };
          h = async (req: any, res: any, next: any, ...models: any[]) => {
            const controllerInstance = container.make<any>(ControllerClass);
            const method = controllerInstance.handle || controllerInstance.__invoke || controllerInstance;
@@ -442,6 +449,14 @@ export class RouterBuilder {
       const r = resolveMiddleware(h as any);
       if (Array.isArray(r)) resolvedHandlers.push(...(r as any));
       else resolvedHandlers.push(r as any);
+    }
+
+    // If no controller ref was captured, store the last handler function ref
+    if (!controllerRef) {
+      const lastHandler = handlers[handlers.length - 1];
+      if (typeof lastHandler === 'function' && !this.isClassConstructor(lastHandler)) {
+        controllerRef = { controller: lastHandler };
+      }
     }
 
     // Wrap the final handler to inject models
@@ -474,6 +489,7 @@ export class RouterBuilder {
       path: fullPath,
       name: routeName,
       middleware: middlewareNames,
+      controllerRef,
     });
   }
 
@@ -907,7 +923,13 @@ export class RouterBuilder {
   }
 
   // Get all routes (including unnamed)
-  getRoutes(): Array<{ method: string; path: string; name: string | null; middleware: string[] }> {
+  getRoutes(): Array<{
+    method: string;
+    path: string;
+    name: string | null;
+    middleware: string[];
+    controllerRef?: { controller: any; method?: string };
+  }> {
     return this.registeredRoutes;
   }
 
