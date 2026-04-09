@@ -213,7 +213,7 @@ export class OpenApiGenerator {
             doc.info.contact = options.contact;
         }
 
-        const serverUrl = options.serverUrl || process.env.DOCS_SERVER_URL || `http://localhost:${process.env.PORT || 3000}`;
+        const serverUrl = options.serverUrl || process.env.DOCS_SERVER_URL || process.env.APP_URL ||`http://localhost:${process.env.PORT || 3000}`;
         doc.servers!.push({ url: serverUrl, description: 'Default Server' });
 
         // Collect unique tags
