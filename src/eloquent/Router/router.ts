@@ -417,10 +417,15 @@ export class RouterBuilder {
 
     for (let h of handlers as any[]) {
       // Handle [ControllerClass, 'method'] or ControllerClass (if it has a handle method or similar)
-      if (Array.isArray(h) && h.length === 2 && typeof h[0] === 'function') {
+        if (Array.isArray(h) && h.length === 2 && typeof h[0] === 'function') {
         const [ControllerClass, methodName] = h;
         controllerRef = { controller: ControllerClass, method: String(methodName) };
-        h = async (req: any, res: any, next: any, ...models: any[]) => {
+        // Use a wrapper whose declared arity matches the "arity === 3" branch in
+        // wrapHandlersWithModelInjection. We declare a neutral third parameter
+        // ("_firstBound") and collect additional bound models via rest so that
+        // when the wrapper is invoked with (req, res, ...values) the values map
+        // correctly to the controller method arguments.
+        h = async (req: any, res: any, _firstBound?: any, ...models: any[]) => {
           const controllerInstance = container.make<any>(ControllerClass);
           if (!controllerInstance[methodName]) {
             const className = ControllerClass?.name ?? "UnknownController";
@@ -431,16 +436,19 @@ export class RouterBuilder {
             );
           }
 
-          return controllerInstance[methodName](req, res, ...models);
+          const allModels = [_firstBound, ...models].filter((v) => v !== undefined);
+          return controllerInstance[methodName](req, res, ...allModels);
         };
       } else if (this.isClassConstructor(h)) {
          const ControllerClass = h;
          controllerRef = { controller: ControllerClass, method: 'handle' };
-         h = async (req: any, res: any, next: any, ...models: any[]) => {
+         // Same strategy as above for class-style controller invocations.
+         h = async (req: any, res: any, _firstBound?: any, ...models: any[]) => {
            const controllerInstance = container.make<any>(ControllerClass);
            const method = controllerInstance.handle || controllerInstance.__invoke || controllerInstance;
            if (typeof method === 'function') {
-             return method.call(controllerInstance, req, res, ...models);
+             const allModels = [_firstBound, ...models].filter((v) => v !== undefined);
+             return method.call(controllerInstance, req, res, ...allModels);
            }
            return method;
          };
