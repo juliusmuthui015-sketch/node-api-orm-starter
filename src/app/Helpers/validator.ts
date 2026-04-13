@@ -105,6 +105,17 @@ const defaultMessages: Record<string, string> = {
   mimes: ':attribute must be a file of type: :values.',
   max_file_size: ':attribute may not be larger than :max MB.',
 
+  // Conditional required
+  required_if:           ':attribute is required.',
+  required_unless:       ':attribute is required.',
+  required_with:         ':attribute is required when :values is present.',
+  required_with_all:     ':attribute is required when :values are all present.',
+  required_without:      ':attribute is required when :values is not present.',
+  required_without_all:  ':attribute is required when none of :values are present.',
+
+  // Presence
+  present: ':attribute field must be present.',
+
   // Custom
   invalid: ':attribute is invalid.',
   nested_validation_failed: ':attribute contains invalid data.',
@@ -392,18 +403,81 @@ export async function validate<T extends Record<string, any>>(
           .map((s) => s.trim())
           .filter(Boolean);
 
-      const isRequired = parts.includes('required');
-      const isNullable = parts.includes('nullable');
-      const present = raw !== undefined && raw !== null && raw !== '';
+      const isRequired  = parts.includes('required');
+      const isNullable  = parts.includes('nullable');
+      const isSometimes = parts.includes('sometimes');
+      const isPresent   = parts.includes('present');
+      const present     = raw !== undefined && raw !== null && raw !== '';
 
-      // Check required field
-      if (isRequired && !present) {
+      // ── Conditional required rules ──────────────────────────────────────
+      // required_if:field,val1,val2,...      → required when payload[field] equals any value
+      // required_unless:field,val1,val2,...  → required unless payload[field] equals any value
+      // required_with:f1,f2,...              → required when ANY of the listed fields are present
+      // required_with_all:f1,f2,...          → required when ALL listed fields are present
+      // required_without:f1,f2,...           → required when ANY listed field is absent
+      // required_without_all:f1,f2,...       → required when ALL listed fields are absent
+      let conditionalRequired = false;
+
+      for (const p of parts) {
+        if (p.startsWith('required_if:')) {
+          const [condField, ...values] = p.slice('required_if:'.length).split(',').map((s) => s.trim());
+          const condVal = String(getAtPath(out, condField) ?? '');
+          if (values.some((v) => v === condVal)) conditionalRequired = true;
+
+        } else if (p.startsWith('required_unless:')) {
+          const [condField, ...values] = p.slice('required_unless:'.length).split(',').map((s) => s.trim());
+          const condVal = String(getAtPath(out, condField) ?? '');
+          if (!values.some((v) => v === condVal)) conditionalRequired = true;
+
+        } else if (p.startsWith('required_with:')) {
+          const fields = p.slice('required_with:'.length).split(',').map((s) => s.trim());
+          if (fields.some((f) => {
+            const v = getAtPath(out, f);
+            return v !== undefined && v !== null && v !== '';
+          })) conditionalRequired = true;
+
+        } else if (p.startsWith('required_with_all:')) {
+          const fields = p.slice('required_with_all:'.length).split(',').map((s) => s.trim());
+          if (fields.every((f) => {
+            const v = getAtPath(out, f);
+            return v !== undefined && v !== null && v !== '';
+          })) conditionalRequired = true;
+
+        } else if (p.startsWith('required_without:')) {
+          const fields = p.slice('required_without:'.length).split(',').map((s) => s.trim());
+          if (fields.some((f) => {
+            const v = getAtPath(out, f);
+            return v === undefined || v === null || v === '';
+          })) conditionalRequired = true;
+
+        } else if (p.startsWith('required_without_all:')) {
+          const fields = p.slice('required_without_all:'.length).split(',').map((s) => s.trim());
+          if (fields.every((f) => {
+            const v = getAtPath(out, f);
+            return v === undefined || v === null || v === '';
+          })) conditionalRequired = true;
+        }
+      }
+
+      const effectiveRequired = isRequired || conditionalRequired;
+
+      // `sometimes` — only run validation rules when the field was actually sent
+      if (isSometimes && !present) continue;
+
+      // `present` — the key must exist in the payload (null / empty allowed)
+      if (isPresent && raw === undefined) {
+        pushError(field, 'present', { value: raw });
+        continue;
+      }
+
+      // Enforce required / conditional-required
+      if (effectiveRequired && !present) {
         pushError(field, 'required', { value: raw });
         continue;
       }
 
-      // Skip validation for nullable empty fields
-      if (!present && (isNullable || !isRequired)) {
+      // Skip remaining rules for nullable/optional empty fields
+      if (!present && (isNullable || !effectiveRequired)) {
         continue;
       }
 
@@ -412,7 +486,15 @@ export async function validate<T extends Record<string, any>>(
 
       // Process each rule part
       for (const p of parts) {
-        if (p === 'required' || p === 'nullable') continue;
+        if (p === 'required' || p === 'nullable' || p === 'sometimes' || p === 'present') continue;
+        if (
+          p.startsWith('required_if:')          ||
+          p.startsWith('required_unless:')      ||
+          p.startsWith('required_with:')        ||
+          p.startsWith('required_with_all:')    ||
+          p.startsWith('required_without:')     ||
+          p.startsWith('required_without_all:')
+        ) continue;
 
         if (failed) break;
 
