@@ -74,6 +74,51 @@ function validationRuleToSchema(ruleString: string): {
             case part === 'nullable':
                 // Not required
                 break;
+            case part === 'sometimes':
+                // Only validated when present — not unconditionally required
+                break;
+            case part === 'present':
+                descParts.push('Field must be present (may be null)');
+                break;
+
+            // ── Conditional required rules ────────────────────────────────
+            case part.startsWith('required_if:'):
+                // conditionally required — not marked as globally required
+                ((): void => {
+                    const [condField, ...values] = part.slice('required_if:'.length).split(',').map((s) => s.trim());
+                    descParts.push(`Required when \`${condField}\` is ${values.join(' or ')}`);
+                })();
+                break;
+            case part.startsWith('required_unless:'):
+                ((): void => {
+                    const [condField, ...values] = part.slice('required_unless:'.length).split(',').map((s) => s.trim());
+                    descParts.push(`Required unless \`${condField}\` is ${values.join(' or ')}`);
+                })();
+                break;
+            case part.startsWith('required_with:'):
+                ((): void => {
+                    const fields = part.slice('required_with:'.length).split(',').map((s) => s.trim());
+                    descParts.push(`Required when any of [${fields.join(', ')}] is present`);
+                })();
+                break;
+            case part.startsWith('required_with_all:'):
+                ((): void => {
+                    const fields = part.slice('required_with_all:'.length).split(',').map((s) => s.trim());
+                    descParts.push(`Required when all of [${fields.join(', ')}] are present`);
+                })();
+                break;
+            case part.startsWith('required_without:'):
+                ((): void => {
+                    const fields = part.slice('required_without:'.length).split(',').map((s) => s.trim());
+                    descParts.push(`Required when any of [${fields.join(', ')}] is absent`);
+                })();
+                break;
+            case part.startsWith('required_without_all:'):
+                ((): void => {
+                    const fields = part.slice('required_without_all:'.length).split(',').map((s) => s.trim());
+                    descParts.push(`Required when all of [${fields.join(', ')}] are absent`);
+                })();
+                break;
             case part === 'string':
                 type = 'string';
                 break;
