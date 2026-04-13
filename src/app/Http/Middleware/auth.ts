@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { asyncLocalStorage } from '@/app/Http/Middleware/asyncContext';
 import User from '@/app/Models/User/User';
+import {decryptToken} from "@app/Helpers/auth";
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change';
 
@@ -18,18 +19,45 @@ declare global {
     }
 }
 
-export async function authMiddleware(req: Request, res: Response, next: NextFunction) {
+export async function authMiddleware(
+    req: Request,
+    res: Response,
+    next: NextFunction
+) {
     const header = req.headers['authorization'] || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
-    if (!token) return res.status(401).json({ message: 'Unauthorized' });
+    const token = header.startsWith('Bearer ')
+        ? header.slice(7)
+        : '';
+
+    if (!token) {
+        return res.status(401).json({
+            message: 'Unauthorized',
+        });
+    }
 
     try {
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
+        // DECRYPT FIRST
+        const decryptedJwt = decryptToken(token);
+
+        // VERIFY AFTER DECRYPTION
+        const decoded = jwt.verify(
+            decryptedJwt,
+            JWT_SECRET
+        ) as any;
+
         const uid = decoded.sub;
 
-        // Load full user model (including roles and permissions)
-        const userModel = await User.with(['profile', 'roles', 'roles.permissions']).find(uid);
-        if (!userModel) return res.status(401).json({ message: 'Unauthorized' });
+        const userModel = await User.with([
+            'profile',
+            'roles',
+            'roles.permissions',
+        ]).find(uid);
+
+        if (!userModel) {
+            return res.status(401).json({
+                message: 'Unauthorized',
+            });
+        }
 
         await userModel.update({
             last_seen_at: new Date(),
@@ -37,27 +65,33 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
 
         await userModel.refresh();
 
-        // compute permissions from roles
         const roles = (userModel.toJSON() as any).roles || [];
         const permissionsArr: any[] = [];
-        for (const r of roles) {
-            permissionsArr.push(...((r as any).permissions || []));
+
+        for (const role of roles) {
+            permissionsArr.push(
+                ...((role as any).permissions || [])
+            );
         }
-        // set req.user for compatibility and store full model in async local storage
+
         req.user = {
             id: uid,
             roles: roles.map((r: any) => r.slug),
-            permissions: permissionsArr.map((p: any) => p.slug),
+            permissions: permissionsArr.map(
+                (p: any) => p.slug
+            ),
         };
 
         const store = asyncLocalStorage.getStore();
         if (store) {
-            store.user = userModel; // store model instance for helpers
+            store.user = userModel;
         }
 
         next();
     } catch (e) {
-        return res.status(401).json({ message: 'Unauthorized', error: e });
+        return res.status(401).json({
+            message: 'Unauthorized',
+        });
     }
 }
 

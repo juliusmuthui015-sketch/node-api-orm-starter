@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt';
 import jwt, {JwtPayload, Secret, SignOptions} from 'jsonwebtoken';
 import {TPermission, TRole} from '@/app/Http/types';
 import User from '@/app/Models/User/User';
+import {encryptToken} from "@app/Helpers/auth";
 
 const JWT_SECRET: Secret = (process.env.JWT_SECRET || 'dev-secret-change') as Secret;
 const JWT_EXPIRES_IN: SignOptions['expiresIn'] = (process.env.JWT_EXPIRES_IN || '7d') as any;
@@ -19,20 +20,33 @@ export class AuthService {
 
   async login(email: string, password: string) {
     let user = await User.where('email', '=', email)
-      .with(['profile', 'roles', 'roles.permissions'])
-      .first();
+        .with(['profile', 'roles', 'roles.permissions'])
+        .first();
+
     if (!user) return null;
+
+    const ok = await bcrypt.compare(password, user.password || '');
+    if (!ok) return null;
 
     await user.update({
       last_login: new Date(),
     });
-    const ok = await bcrypt.compare(password, user.password || '');
-    if (!ok) return null;
 
-    const payload: JwtPayload = { sub: String(user.id), email: user.email } as any;
-    const options: SignOptions = { expiresIn: JWT_EXPIRES_IN };
-    const token = jwt.sign(payload, JWT_SECRET, options);
-    return { token: token, user: user.toJSON() };
+    const payload: JwtPayload = {
+      sub: String(user.id),
+      email: user.email,
+    };
+
+    const signedToken = jwt.sign(payload, JWT_SECRET, {
+      expiresIn: JWT_EXPIRES_IN,
+    });
+
+    const encryptedToken = encryptToken(signedToken);
+
+    return {
+      token: encryptedToken,
+      user: user.toJSON(),
+    };
   }
 
   async getUserRoles(userId: number | string): Promise<TRole[]> {
