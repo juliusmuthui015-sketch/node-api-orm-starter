@@ -246,6 +246,117 @@ function validationRuleToSchema(ruleString: string): {
                     descParts.push(`Must differ from \`${otherField}\``);
                 })();
                 break;
+
+            // ── Date / time rules ─────────────────────────────────────────
+            case part === 'time':
+                type = 'string';
+                format = 'time';
+                descParts.push('Valid time string (HH:MM or HH:MM:SS)');
+                break;
+            case part === 'datetime':
+                type = 'string';
+                format = 'date-time';
+                break;
+            case part === 'timezone':
+                type = 'string';
+                descParts.push('Valid IANA timezone identifier (e.g. Africa/Nairobi, UTC, America/New_York)');
+                break;
+            case part.startsWith('date_format:'):
+                ((): void => {
+                    const fmt = part.slice('date_format:'.length).trim();
+                    type = 'string';
+                    // Map common format tokens to an OpenAPI format hint
+                    if (fmt.includes('HH') || fmt.includes('mm') || fmt.includes('ss')) {
+                        format = fmt.includes('YYYY') || fmt.includes('DD') ? 'date-time' : 'time';
+                    } else {
+                        format = 'date';
+                    }
+                    // Provide format token reference and concrete example
+                    const example = fmt
+                        .replace(/YYYY/g, '2026')
+                        .replace(/YY/g, '26')
+                        .replace(/MM/g, '04')
+                        .replace(/DD/g, '16')
+                        .replace(/HH/g, '09')
+                        .replace(/mm/g, '05')
+                        .replace(/ss/g, '30')
+                        .replace(/SSS/g, '123')
+                        .replace(/Z/g, '+03:00');
+                    descParts.push(`Format: \`${fmt}\` — e.g. \`${example}\``);
+                })();
+                break;
+            case part.startsWith('before:'):
+                ((): void => {
+                    const ref = part.slice('before:'.length).trim();
+                    type = 'string';
+                    format = format || 'date';
+                    descParts.push(`Must be a date **before** \`${ref}\``);
+                })();
+                break;
+            case part.startsWith('before_or_equal:'):
+                ((): void => {
+                    const ref = part.slice('before_or_equal:'.length).trim();
+                    type = 'string';
+                    format = format || 'date';
+                    descParts.push(`Must be a date **before or equal to** \`${ref}\``);
+                })();
+                break;
+            case part.startsWith('after:'):
+                ((): void => {
+                    const ref = part.slice('after:'.length).trim();
+                    type = 'string';
+                    format = format || 'date';
+                    descParts.push(`Must be a date **after** \`${ref}\``);
+                })();
+                break;
+            case part.startsWith('after_or_equal:'):
+                ((): void => {
+                    const ref = part.slice('after_or_equal:'.length).trim();
+                    type = 'string';
+                    format = format || 'date';
+                    descParts.push(`Must be a date **after or equal to** \`${ref}\``);
+                })();
+                break;
+            case part.startsWith('date_equals:'):
+                ((): void => {
+                    const ref = part.slice('date_equals:'.length).trim();
+                    type = 'string';
+                    format = format || 'date';
+                    descParts.push(`Must be the **same date as** \`${ref}\``);
+                })();
+                break;
+
+            // ── String content rules ──────────────────────────────────────
+            case part.startsWith('not_in:'):
+                ((): void => {
+                    const vals = part.split(':')[1].split(',').map((s) => s.trim());
+                    descParts.push(`Must NOT be one of: ${vals.map((v) => `\`${v}\``).join(', ')}`);
+                })();
+                break;
+            case part.startsWith('starts_with:'):
+                ((): void => {
+                    const prefixes = part.slice('starts_with:'.length).split(',').map((s) => s.trim());
+                    descParts.push(`Must start with one of: ${prefixes.map((v) => `\`${v}\``).join(', ')}`);
+                })();
+                break;
+            case part.startsWith('ends_with:'):
+                ((): void => {
+                    const suffixes = part.slice('ends_with:'.length).split(',').map((s) => s.trim());
+                    descParts.push(`Must end with one of: ${suffixes.map((v) => `\`${v}\``).join(', ')}`);
+                })();
+                break;
+            case part.startsWith('contains:'):
+                ((): void => {
+                    const sub = part.slice('contains:'.length).trim();
+                    descParts.push(`Must contain \`${sub}\``);
+                })();
+                break;
+            case part === 'accepted':
+                descParts.push('Must be accepted (true, 1, "yes", "on")');
+                break;
+            case part === 'declined':
+                descParts.push('Must be declined (false, 0, "no", "off")');
+                break;
         }
     }
 
@@ -435,54 +546,103 @@ export class OpenApiGenerator {
 
     /**
      * Build request body JSON schema from @Doc.body, @Doc.validates, or validation rules.
+     *
+     * Supports:
+     *  - Flat fields: `email`, `name`
+     *  - Nested dot-notation fields: `cover.start_date`, `user.profile.id_number`
+     *    → rendered as nested `object` schemas
+     *  - Explicit `DocBodyFieldMeta` objects (override rule-derived schema)
+     *  - All date/time validation rules: `date_format`, `before`, `after`, `before_or_equal`,
+     *    `after_or_equal`, `date_equals`, `time`, `datetime`, `timezone`
      */
     private static buildRequestBodySchema(route: ScannedRoute): any | null {
         const body = route.doc.body;
         const validationRules = route.doc.validationRules;
 
-        // Priority: explicit body > validation rules
-        const rules: Record<string, string> = {};
+        // Merge body overrides on top of validation rules (body wins per field)
+        const rules: Record<string, string | null> = {};
+        const bodyOverrides: Record<string, any> = {}; // field → explicit DocBodyFieldMeta schema
+
+        if (validationRules) {
+            Object.assign(rules, validationRules);
+        }
 
         if (body) {
             for (const [field, spec] of Object.entries(body)) {
                 if (typeof spec === 'string') {
                     rules[field] = spec;
                 } else {
-                    // DocBodyFieldMeta – convert to rule string for uniform processing
+                    // Explicit DocBodyFieldMeta — store separately so we use it verbatim
                     const meta = spec as DocBodyFieldMeta;
-                    const parts: string[] = [];
-                    if (meta.required) parts.push('required');
-                    if (meta.type) parts.push(meta.type);
-                    if (meta.enum) parts.push(`in:${meta.enum.join(',')}`);
-                    rules[field] = parts.join('|') || 'nullable|string';
+                    const schemaOverride: any = {};
+                    if (meta.type)        schemaOverride.type        = meta.type;
+                    if (meta.format)      schemaOverride.format      = meta.format;
+                    if (meta.description) schemaOverride.description = meta.description;
+                    if (meta.example !== undefined) schemaOverride.example = meta.example;
+                    if (meta.enum)        schemaOverride.enum        = meta.enum;
+                    if (meta.items)       schemaOverride.items       = meta.items;
+                    bodyOverrides[field] = schemaOverride;
+                    rules[field] = meta.required ? 'required' : 'nullable';
                 }
             }
-        } else if (validationRules) {
-            Object.assign(rules, validationRules);
         }
 
-        if (Object.keys(rules).length === 0) return null;
+        if (Object.keys(rules).length === 0 && Object.keys(bodyOverrides).length === 0) return null;
+
+        // Helper: set a value at a dot-notation path inside a nested object tree
+        function setNestedSchema(root: Record<string, any>, path: string, schema: any): void {
+            const parts = path.split('.');
+            let cur = root;
+            for (let i = 0; i < parts.length - 1; i++) {
+                const key = parts[i];
+                if (!cur[key]) {
+                    cur[key] = { type: 'object', properties: {} };
+                }
+                if (!cur[key].properties) cur[key].properties = {};
+                cur = cur[key].properties;
+            }
+            const leaf = parts[parts.length - 1];
+            // Merge if the leaf already exists (e.g. a body override on top of a rule-derived entry)
+            cur[leaf] = { ...(cur[leaf] || {}), ...schema };
+        }
 
         const properties: Record<string, any> = {};
         const required: string[] = [];
 
+        // Process validation rules (skip wildcards)
         for (const [field, ruleString] of Object.entries(rules)) {
-            // Skip wildcard/nested rules (e.g. 'roles.*')
-            if (field.includes('*') || field.includes('.')) continue;
+            if (!ruleString || field.includes('*')) continue;
+
+            // Use body override schema if present; otherwise derive from rule string
+            const override = bodyOverrides[field];
+            if (override) {
+                const isRequired = ruleString.includes('required');
+                setNestedSchema(properties, field, override);
+                if (isRequired && !field.includes('.')) required.push(field);
+                continue;
+            }
 
             const schema = validationRuleToSchema(ruleString);
             const { required: isRequired, ...schemaProps } = schema;
-            properties[field] = schemaProps;
 
-            if (isRequired) required.push(field);
+            if (field.includes('.')) {
+                setNestedSchema(properties, field, schemaProps);
+            } else {
+                properties[field] = { ...(properties[field] || {}), ...schemaProps };
+                if (isRequired) required.push(field);
+            }
+        }
+
+        // Any body overrides whose field wasn't in validationRules
+        for (const [field, schema] of Object.entries(bodyOverrides)) {
+            if (!(field in rules)) {
+                setNestedSchema(properties, field, schema);
+            }
         }
 
         if (Object.keys(properties).length === 0) return null;
 
-        const result: any = {
-            type: 'object',
-            properties,
-        };
+        const result: any = { type: 'object', properties };
         if (required.length > 0) result.required = required;
 
         return result;

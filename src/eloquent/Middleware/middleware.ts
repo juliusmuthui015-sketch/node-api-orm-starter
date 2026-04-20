@@ -1,5 +1,5 @@
 import {NextFunction, RequestHandler} from 'express';
-import { middlewareStack, MiddlewareStack, Middleware, MiddlewareInterface, MiddlewareGroupConfig } from './MiddlewareStack';
+import { middlewareStack, MiddlewareStack, Middleware, IMiddleware, MiddlewareGroupConfig } from './MiddlewareStack';
 
 export type MiddlewareEntry = RequestHandler | ((...args: any[]) => RequestHandler);
 
@@ -79,5 +79,5 @@ export function resolveMiddleware(
   throw new Error(`Unknown middleware: ${String(mw)}`);
 }
 // Re-export from MiddlewareStack
-export { MiddlewareStack, Middleware, MiddlewareInterface, MiddlewareGroupConfig, middlewareStack };
+export { MiddlewareStack, Middleware, IMiddleware, MiddlewareGroupConfig, middlewareStack };
 

@@ -1,9 +1,9 @@
 import { RequestHandler, NextFunction, Request, Response } from 'express';
 
 export type MiddlewareEntry = RequestHandler | ((...args: any[]) => RequestHandler);
-export type Middleware = new (...args: any[]) => MiddlewareInterface;
+export type Middleware = new (...args: any[]) => IMiddleware;
 
-export interface MiddlewareInterface {
+export interface IMiddleware {
     handle(req: Request, res: Response, next: NextFunction): void | Promise<void>;
     terminate?(req: Request, res: Response): void | Promise<void>;
 }
@@ -68,7 +68,7 @@ export class MiddlewareStack {
     | Terminating Middleware
     |--------------------------------------------------------------------------
     */
-    protected terminatingMiddleware: MiddlewareInterface[] = [];
+    protected terminatingMiddleware: IMiddleware[] = [];
 
     /*
     |--------------------------------------------------------------------------
@@ -324,7 +324,7 @@ export class MiddlewareStack {
     /**
      * Register terminating middleware that runs after response is sent.
      */
-    terminate(middleware: MiddlewareInterface): this {
+    terminate(middleware: IMiddleware): this {
         this.terminatingMiddleware.push(middleware);
         return this;
     }
@@ -343,7 +343,7 @@ export class MiddlewareStack {
     /**
      * Get terminating middleware.
      */
-    getTerminatingMiddleware(): MiddlewareInterface[] {
+    getTerminatingMiddleware(): IMiddleware[] {
         return [...this.terminatingMiddleware];
     }
 
@@ -426,7 +426,7 @@ export class MiddlewareStack {
     /**
      * Instantiate a middleware class.
      */
-    protected instantiateMiddlewareClass(MiddlewareClass: Middleware): MiddlewareInterface {
+    protected instantiateMiddlewareClass(MiddlewareClass: Middleware): IMiddleware {
         // Check singleton cache
         if (this.isSingleton(MiddlewareClass)) {
             if (this.singletonInstances.has(MiddlewareClass)) {
@@ -443,7 +443,7 @@ export class MiddlewareStack {
     /**
      * Wrap a middleware instance into a RequestHandler.
      */
-    protected wrapMiddlewareInstance(instance: MiddlewareInterface): RequestHandler {
+    protected wrapMiddlewareInstance(instance: IMiddleware): RequestHandler {
         return (req: Request, res: Response, next: NextFunction) => {
             return instance.handle(req, res, next);
         };

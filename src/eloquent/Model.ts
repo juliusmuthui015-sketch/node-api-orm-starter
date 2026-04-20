@@ -34,8 +34,10 @@ export function use(...traitClasses: any[]): any {
   return function (constructor: Function) {
     const modelClass = constructor as typeof Model;
 
-    // Ensure traits array exists
-    if (!modelClass.traits) {
+    // Ensure each subclass has its OWN traits array (not the inherited base one).
+    // Using hasOwnProperty prevents accidentally mutating the shared Model.traits
+    // array which would cause all subclasses to inherit every other model's traits.
+    if (!Object.prototype.hasOwnProperty.call(modelClass, 'traits')) {
       modelClass.traits = [];
     }
 
@@ -48,7 +50,7 @@ export function use(...traitClasses: any[]): any {
       }
 
       // Store the class reference for later application
-      if (!(modelClass as any).__traitClasses) {
+      if (!Object.prototype.hasOwnProperty.call(modelClass, '__traitClasses')) {
         (modelClass as any).__traitClasses = [];
       }
       (modelClass as any).__traitClasses.push(traitClass as any);
@@ -219,12 +221,13 @@ export abstract class Model {
   private applyTraitsToInstance(): void {
     const staticClass = this.constructor as typeof Model;
 
-    // Initialize static properties if not already done
-    if (!staticClass.traits) staticClass.traits = [];
-    if (!staticClass.localScopes) staticClass.localScopes = {};
-    if (!staticClass.globalScopes) staticClass.globalScopes = {};
-    if (!staticClass.withoutGlobalScopes) staticClass.withoutGlobalScopes = [];
-    if (!staticClass.eventListeners) {
+    // Initialize static properties with OWN copies so subclasses never share
+    // the base Model arrays/maps (which would cause cross-model trait leakage).
+    if (!Object.prototype.hasOwnProperty.call(staticClass, 'traits')) staticClass.traits = [];
+    if (!Object.prototype.hasOwnProperty.call(staticClass, 'localScopes')) staticClass.localScopes = {};
+    if (!Object.prototype.hasOwnProperty.call(staticClass, 'globalScopes')) staticClass.globalScopes = {};
+    if (!Object.prototype.hasOwnProperty.call(staticClass, 'withoutGlobalScopes')) staticClass.withoutGlobalScopes = [];
+    if (!Object.prototype.hasOwnProperty.call(staticClass, 'eventListeners')) {
       staticClass.eventListeners = {
         creating: [],
         created: [],
@@ -502,12 +505,12 @@ export abstract class Model {
    */
   static boot(): void {
     // Apply traits
-    applyTraits(this, this.traits);
-
-    // Call bootTraits if exists
-    if ((this as any).bootTraits) {
-      (this as any).bootTraits();
-    }
+    // applyTraits(this, this.traits);
+    //
+    // // Call bootTraits if exists
+    // if ((this as any).bootTraits) {
+    //   (this as any).bootTraits();
+    // }
   }
 
   // ====================
@@ -519,17 +522,20 @@ export abstract class Model {
    * This runs automatically on first static call (e.g., query/ scope).
    */
   static ensureBooted(): void {
+
+    this.boot();
     const self = this as typeof Model & {
       __traitsApplied?: boolean;
       __traitClasses?: ClassBasedTrait[];
     };
 
-    // Initialize static containers if missing
-    if (!self.traits) self.traits = [];
-    if (!self.localScopes) self.localScopes = {} as any;
-    if (!self.globalScopes) self.globalScopes = {} as any;
-    if (!self.withoutGlobalScopes) self.withoutGlobalScopes = [] as any;
-    if (!self.eventListeners) {
+    // Initialize static containers with OWN copies (hasOwnProperty) to prevent
+    // subclasses from sharing the base Model arrays/maps.
+    if (!Object.prototype.hasOwnProperty.call(self, 'traits')) self.traits = [];
+    if (!Object.prototype.hasOwnProperty.call(self, 'localScopes')) self.localScopes = {} as any;
+    if (!Object.prototype.hasOwnProperty.call(self, 'globalScopes')) self.globalScopes = {} as any;
+    if (!Object.prototype.hasOwnProperty.call(self, 'withoutGlobalScopes')) self.withoutGlobalScopes = [] as any;
+    if (!Object.prototype.hasOwnProperty.call(self, 'eventListeners')) {
       self.eventListeners = {
         creating: [],
         created: [],
