@@ -38,6 +38,17 @@ export abstract class Command {
 
     /*
     |--------------------------------------------------------------------------
+    | Keep Alive
+    |--------------------------------------------------------------------------
+    |
+    | If true, the process will NOT exit after the command finishes.
+    | Set to true for daemon commands like queue:work, schedule:work.
+    |
+    */
+    protected keepAlive: boolean = false;
+
+    /*
+    |--------------------------------------------------------------------------
     | Parsed arguments storage
     |--------------------------------------------------------------------------
     */
@@ -97,7 +108,15 @@ export abstract class Command {
             },
             async (args: ArgumentsCamelCase) => {
                 this.parsedArgs = args;
-                await this.handle(args);
+                try {
+                    await this.handle(args);
+                    if (!this.keepAlive) {
+                        process.exit(0);
+                    }
+                } catch (err) {
+                    console.error(err);
+                    process.exit(1);
+                }
             }
         );
     }

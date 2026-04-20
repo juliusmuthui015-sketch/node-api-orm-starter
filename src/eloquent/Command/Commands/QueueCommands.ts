@@ -15,6 +15,7 @@ import queueConfig from '@/config/queue.config';
 export class QueueWorkCommand extends Command {
     protected signature = 'queue:work [connection]';
     protected description = 'Start processing jobs on the queue as a daemon';
+    protected keepAlive = true;
 
     protected arguments = {
         connection: {
@@ -153,6 +154,7 @@ export class QueueWorkCommand extends Command {
 export class QueueListenCommand extends Command {
     protected signature = 'queue:listen [connection]';
     protected description = 'Listen to a given queue';
+    protected keepAlive = true;
 
     protected arguments = {
         connection: {
@@ -557,6 +559,7 @@ export class ScheduleRunCommand extends Command {
 export class ScheduleWorkCommand extends Command {
     protected signature = 'schedule:work';
     protected description = 'Start the schedule worker';
+    protected keepAlive = true;
 
     async handle(args: ArgumentsCamelCase): Promise<void> {
         console.log('╔══════════════════════════════════════════════════════════════╗');
