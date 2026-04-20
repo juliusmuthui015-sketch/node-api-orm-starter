@@ -100,6 +100,17 @@ const defaultMessages: Record<string, string> = {
   lt: ':attribute must be less than :field.',
   lte: ':attribute must be less than or equal to :field.',
 
+  // Date / time comparisons
+  before: ':attribute must be a date before :field.',
+  before_or_equal: ':attribute must be a date before or equal to :field.',
+  after: ':attribute must be a date after :field.',
+  after_or_equal: ':attribute must be a date after or equal to :field.',
+  date_equals: ':attribute must be the same date as :field.',
+  date_format: ':attribute does not match the format :format.',
+  time: ':attribute must be a valid time (HH:MM or HH:MM:SS).',
+  datetime: ':attribute must be a valid date and time.',
+  timezone: ':attribute must be a valid timezone.',
+
   // File validations
   file: ':attribute must be a file.',
   mimes: ':attribute must be a file of type: :values.',
@@ -121,6 +132,50 @@ const defaultMessages: Record<string, string> = {
   nested_validation_failed: ':attribute contains invalid data.',
   object_array: ':attribute must be an array of objects.',
 };
+
+/**
+ * Parse a date string using multiple common formats.
+ * Supports: YYYY-MM-DD, DD/MM/YYYY, MM/DD/YYYY, YYYY/MM/DD, DD-MM-YYYY, MM-DD-YYYY,
+ *           ISO 8601 strings, and any format natively understood by Date().
+ *
+ * Returns a valid Date object or null if parsing fails.
+ */
+function parseDate(val: any): Date | null {
+  if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+  const str = String(val).trim();
+
+  // Try native first (handles ISO 8601 like YYYY-MM-DD, YYYY-MM-DDTHH:mm:ssZ, etc.)
+  const native = new Date(str);
+  if (!isNaN(native.getTime())) return native;
+
+  // Ordered list of manual-parse patterns
+  const patterns: Array<{ re: RegExp; y: number; m: number; d: number }> = [
+    // DD/MM/YYYY or DD/MM/YY
+    { re: /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/, y: 3, m: 2, d: 1 },
+    // DD-MM-YYYY or DD-MM-YY
+    { re: /^(\d{1,2})-(\d{1,2})-(\d{2,4})$/, y: 3, m: 2, d: 1 },
+    // DD.MM.YYYY
+    { re: /^(\d{1,2})\.(\d{1,2})\.(\d{2,4})$/, y: 3, m: 2, d: 1 },
+    // YYYY/MM/DD
+    { re: /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/, y: 1, m: 2, d: 3 },
+    // YYYY.MM.DD
+    { re: /^(\d{4})\.(\d{1,2})\.(\d{1,2})$/, y: 1, m: 2, d: 3 },
+  ];
+
+  for (const { re, y, m, d } of patterns) {
+    const match = str.match(re);
+    if (match) {
+      let year = parseInt(match[y], 10);
+      if (year < 100) year += year < 70 ? 2000 : 1900; // 2-digit year heuristic
+      const month = parseInt(match[m], 10) - 1;
+      const day   = parseInt(match[d], 10);
+      const dt = new Date(year, month, day);
+      if (!isNaN(dt.getTime()) && dt.getMonth() === month) return dt;
+    }
+  }
+
+  return null;
+}
 
 // Helper functions
 function formatMessage(template: string, ctx: Record<string, any>): string {
@@ -488,12 +543,12 @@ export async function validate<T extends Record<string, any>>(
       for (const p of parts) {
         if (p === 'required' || p === 'nullable' || p === 'sometimes' || p === 'present') continue;
         if (
-          p.startsWith('required_if:')          ||
-          p.startsWith('required_unless:')      ||
-          p.startsWith('required_with:')        ||
-          p.startsWith('required_with_all:')    ||
-          p.startsWith('required_without:')     ||
-          p.startsWith('required_without_all:')
+            p.startsWith('required_if:')          ||
+            p.startsWith('required_unless:')      ||
+            p.startsWith('required_with:')        ||
+            p.startsWith('required_with_all:')    ||
+            p.startsWith('required_without:')     ||
+            p.startsWith('required_without_all:')
         ) continue;
 
         if (failed) break;
@@ -582,15 +637,16 @@ export async function validate<T extends Record<string, any>>(
             }
             break;
 
-          case p === 'date':
-            const date = new Date(val);
-            if (isNaN(date.getTime())) {
+          case p === 'date': {
+            const date = parseDate(val);
+            if (!date) {
               pushError(field, 'date', { value: val, kind: typeof val });
               failed = true;
             } else {
               val = date;
             }
             break;
+          }
 
           case p === 'url':
             try {
@@ -691,6 +747,57 @@ export async function validate<T extends Record<string, any>>(
 
           case p.startsWith('lte:'):
             await handleComparisonRule(field, val, p, 'lte', out);
+            break;
+
+          case p.startsWith('before:'):
+            await handleDateComparisonRule(field, val, p, 'before', out);
+            break;
+
+          case p.startsWith('before_or_equal:'):
+            await handleDateComparisonRule(field, val, p, 'before_or_equal', out);
+            break;
+
+          case p.startsWith('after:'):
+            await handleDateComparisonRule(field, val, p, 'after', out);
+            break;
+
+          case p.startsWith('after_or_equal:'):
+            await handleDateComparisonRule(field, val, p, 'after_or_equal', out);
+            break;
+
+          case p.startsWith('date_equals:'):
+            await handleDateComparisonRule(field, val, p, 'date_equals', out);
+            break;
+
+          case p.startsWith('date_format:'):
+            await handleDateFormatRule(field, raw, p);  // always validate the original input string
+            break;
+
+          case p === 'time':
+            if (typeof val !== 'string' || !/^\d{2}:\d{2}(:\d{2})?$/.test(val)) {
+              pushError(field, 'time', { value: val });
+              failed = true;
+            }
+            break;
+
+          case p === 'datetime': {
+            const dtVal = parseDate(val);
+            if (!dtVal) {
+              pushError(field, 'datetime', { value: val });
+              failed = true;
+            } else {
+              val = dtVal;
+            }
+            break;
+          }
+
+          case p === 'timezone':
+            try {
+              Intl.DateTimeFormat(undefined, { timeZone: String(val) });
+            } catch {
+              pushError(field, 'timezone', { value: val });
+              failed = true;
+            }
             break;
 
           case p === 'accepted':
@@ -1016,33 +1123,230 @@ export async function validate<T extends Record<string, any>>(
       payload: any,
   ) {
     const otherField = rule.split(':')[1];
-    const otherValue = payload ? payload[otherField] : undefined;
+    const otherValue = payload ? getAtPath(payload, otherField) : undefined;
 
     if (otherValue === undefined) return false;
 
+    // Try numeric comparison first
     const numVal = Number(val);
     const numOther = Number(otherValue);
 
-    if (isNaN(numVal) || isNaN(numOther)) return false;
+    if (!isNaN(numVal) && !isNaN(numOther)) {
+      let isValid = false;
+      switch (operator) {
+        case 'gt':  isValid = numVal > numOther;  break;
+        case 'gte': isValid = numVal >= numOther; break;
+        case 'lt':  isValid = numVal < numOther;  break;
+        case 'lte': isValid = numVal <= numOther; break;
+      }
+      if (!isValid) {
+        pushError(field, operator, { field: otherField, value: val, other: otherValue });
+        return true;
+      }
+      return false;
+    }
+
+    // Try date comparison
+    const dateVal   = parseDate(val);
+    const dateOther = parseDate(otherValue);
+    if (dateVal && dateOther) {
+      const tVal   = dateVal.getTime();
+      const tOther = dateOther.getTime();
+      let isValid = false;
+      switch (operator) {
+        case 'gt':  isValid = tVal > tOther;  break;
+        case 'gte': isValid = tVal >= tOther; break;
+        case 'lt':  isValid = tVal < tOther;  break;
+        case 'lte': isValid = tVal <= tOther; break;
+      }
+      if (!isValid) {
+        pushError(field, operator, { field: otherField, value: val, other: otherValue });
+        return true;
+      }
+      return false;
+    }
+
+    // Fallback: lexicographic string comparison
+    const strVal   = String(val);
+    const strOther = String(otherValue);
+    let isValid = false;
+    switch (operator) {
+      case 'gt':  isValid = strVal > strOther;  break;
+      case 'gte': isValid = strVal >= strOther; break;
+      case 'lt':  isValid = strVal < strOther;  break;
+      case 'lte': isValid = strVal <= strOther; break;
+    }
+    if (!isValid) {
+      pushError(field, operator, { field: otherField, value: val, other: otherValue });
+      return true;
+    }
+    return false;
+  }
+
+  async function handleDateComparisonRule(
+      field: string,
+      val: any,
+      rule: string,
+      operator: string,
+      payload: any,
+  ) {
+    const otherField = rule.split(':')[1];
+
+    // Allow comparing against a literal date string (e.g. before:2025-01-01) or another field
+    let otherRaw = payload ? getAtPath(payload, otherField) : undefined;
+    if (otherRaw === undefined) otherRaw = otherField; // treat as literal
+
+    // Handle special keywords and relative date expressions
+    if (typeof otherRaw === 'string') {
+      const lower = otherRaw.toLowerCase().trim();
+      if (lower === 'today') {
+        const t = new Date(); t.setHours(0,0,0,0); otherRaw = t;
+      } else if (lower === 'yesterday') {
+        const t = new Date(); t.setDate(t.getDate() - 1); t.setHours(0,0,0,0); otherRaw = t;
+      } else if (lower === 'tomorrow') {
+        const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(0,0,0,0); otherRaw = t;
+      } else {
+        /*
+         * Relative date expression syntax (case-insensitive):
+         *   <anchor>[+|-]<N><unit>
+         *
+         * Anchors : today, yesterday, tomorrow, now
+         * Units   : day(s), week(s), month(s), year(s)
+         *
+         * Examples:
+         *   today+5days        →  5 days from today
+         *   today-2weeks       →  2 weeks before today
+         *   today+1month       →  1 month from today
+         *   today+2months      →  2 months from today
+         *   today+1year        →  1 year from today
+         *   today+2years       →  2 years from today
+         *   yesterday+1week    →  1 week after yesterday
+         *   tomorrow-1month    →  1 month before tomorrow
+         */
+        const relMatch = lower.match(
+            /^(today|yesterday|tomorrow|now)([+-])(\d+)(days?|weeks?|months?|years?)$/
+        );
+        if (relMatch) {
+          const [, anchor, sign, numStr, unit] = relMatch;
+          const n = parseInt(numStr, 10) * (sign === '+' ? 1 : -1);
+          const t = new Date();
+          t.setHours(0, 0, 0, 0);
+          if (anchor === 'yesterday') t.setDate(t.getDate() - 1);
+          if (anchor === 'tomorrow')  t.setDate(t.getDate() + 1);
+          if (unit.startsWith('day'))   t.setDate(t.getDate() + n);
+          if (unit.startsWith('week'))  t.setDate(t.getDate() + n * 7);
+          if (unit.startsWith('month')) t.setMonth(t.getMonth() + n);
+          if (unit.startsWith('year'))  t.setFullYear(t.getFullYear() + n);
+          otherRaw = t;
+        }
+      }
+    }
+
+    const dateVal   = parseDate(val);
+    const dateOther = parseDate(otherRaw);
+
+    if (!dateVal) {
+      pushError(field, 'date', { value: val });
+      return true;
+    }
+    if (!dateOther) {
+      // other field value is not a valid date – skip
+      return false;
+    }
+
+    const tVal   = dateVal.getTime();
+    const tOther = dateOther.getTime();
 
     let isValid = false;
     switch (operator) {
-      case 'gt':
-        isValid = numVal > numOther;
-        break;
-      case 'gte':
-        isValid = numVal >= numOther;
-        break;
-      case 'lt':
-        isValid = numVal < numOther;
-        break;
-      case 'lte':
-        isValid = numVal <= numOther;
-        break;
+      case 'before':          isValid = tVal < tOther;  break;
+      case 'before_or_equal': isValid = tVal <= tOther; break;
+      case 'after':           isValid = tVal > tOther;  break;
+      case 'after_or_equal':  isValid = tVal >= tOther; break;
+      case 'date_equals':     isValid = tVal === tOther; break;
     }
 
     if (!isValid) {
-      pushError(field, operator, { field: otherField, value: val, other: otherValue });
+      pushError(field, operator, { field: otherField, value: val, other: otherRaw });
+      return true;
+    }
+    return false;
+  }
+
+  async function handleDateFormatRule(field: string, val: any, rule: string) {
+    const format = rule.slice('date_format:'.length);
+    const strVal = String(val);
+
+    /*
+    |--------------------------------------------------------------------------
+    | Supported Format Tokens & Examples
+    |--------------------------------------------------------------------------
+    |
+    | Token  Description              Example value
+    | ------  -----------------------  ----------------------------
+    | YYYY   4-digit year             2026
+    | YY     2-digit year             26
+    | MM     2-digit month (01–12)    04
+    | DD     2-digit day   (01–31)    16
+    | HH     2-digit hour  (00–23)    09  |  23
+    | mm     2-digit minute (00–59)   05  |  59
+    | ss     2-digit second (00–59)   00  |  30
+    | SSS    3-digit millisecond      000 |  123
+    | Z      UTC offset or Z          Z   |  +03:00  |  -05:30
+    |
+    |--------------------------------------------------------------------------
+    | Format string examples  →  matching exact value
+    |--------------------------------------------------------------------------
+    |
+    | 'YYYY-MM-DD'               →  '2026-04-16'
+    | 'DD/MM/YYYY'               →  '16/04/2026'
+    | 'MM/DD/YYYY'               →  '04/16/2026'
+    | 'YYYY/MM/DD'               →  '2026/04/16'
+    | 'DD-MM-YYYY'               →  '16-04-2026'
+    | 'YYYY-MM-DD HH:mm'         →  '2026-04-16 09:05'
+    | 'YYYY-MM-DD HH:mm:ss'      →  '2026-04-16 09:05:30'
+    | 'YYYY-MM-DDTHH:mm:ss'      →  '2026-04-16T09:05:30'
+    | 'YYYY-MM-DDTHH:mm:ssZ'     →  '2026-04-16T09:05:30Z'
+    | 'YYYY-MM-DDTHH:mm:ss+03:00'→  '2026-04-16T09:05:30+03:00'
+    | 'YYYY-MM-DDTHH:mm:ss.SSSZ' →  '2026-04-16T09:05:30.123Z'
+    | 'HH:mm'                    →  '09:05'
+    | 'HH:mm:ss'                 →  '09:05:30'
+    | 'DD/MM/YYYY HH:mm'         →  '16/04/2026 09:05'
+    | 'MM-DD-YYYY HH:mm:ss'      →  '04-16-2026 09:05:30'
+    | 'YYYY.MM.DD'               →  '2026.04.16'
+    | 'YY-MM-DD'                 →  '26-04-16'
+    |
+    | Usage in rules:
+    |   'birth_date'  : 'required|date_format:YYYY-MM-DD'
+    |   'event_time'  : 'required|date_format:YYYY-MM-DD HH:mm:ss'
+    |   'iso_ts'      : 'required|date_format:YYYY-MM-DDTHH:mm:ssZ'
+    |--------------------------------------------------------------------------
+    */
+
+    // Map common format tokens to regex pieces
+    const tokenMap: Record<string, string> = {
+      YYYY: '\\d{4}',
+      YY:   '\\d{2}',
+      MM:   '(?:0[1-9]|1[0-2])',
+      DD:   '(?:0[1-9]|[12]\\d|3[01])',
+      HH:   '(?:[01]\\d|2[0-3])',
+      mm:   '[0-5]\\d',
+      ss:   '[0-5]\\d',
+      SSS:  '\\d{3}',
+      Z:    '(?:Z|[+-]\\d{2}:\\d{2})',
+    };
+
+    let pattern = format;
+    // Escape special regex chars except the ones we'll replace
+    pattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Replace format tokens (longest first to avoid partial matches)
+    for (const token of Object.keys(tokenMap).sort((a, b) => b.length - a.length)) {
+      pattern = pattern.replace(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), tokenMap[token]);
+    }
+
+    const regex = new RegExp('^' + pattern + '$');
+    if (!regex.test(strVal)) {
+      pushError(field, 'date_format', { value: val, format });
       return true;
     }
     return false;
