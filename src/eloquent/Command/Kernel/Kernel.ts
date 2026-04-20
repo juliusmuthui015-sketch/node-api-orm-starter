@@ -10,8 +10,8 @@ import * as AppCommands from '@app/Console/Commands';
 import path from "path";
 import { scheduler, Schedule } from '@/eloquent/Queue';
 
-// Import QueueServiceProvider to register scheduled tasks
-import { QueueServiceProvider } from '@/app/Providers/QueueServiceProvider';
+// Import AppServiceProvider to bootstrap all application services
+import { AppServiceProvider } from '@/app/Providers/AppServiceProvider';
 import { container } from '@/eloquent/Container/Container';
 import { Application } from '@/app/Providers/Application';
 
@@ -145,15 +145,15 @@ export class Kernel {
     | Boot
     |--------------------------------------------------------------------------
     */
-    boot(): void {
-        // Initialize QueueServiceProvider to register scheduled tasks
+    async boot(): Promise<void> {
+        // Bootstrap all application services (Queue, Events, Broadcasting, etc.)
         try {
             const app = new Application(container);
-            const queueProvider = new QueueServiceProvider(app);
-            queueProvider.register();
-            queueProvider.boot();
+            const appProvider = new AppServiceProvider(app);
+            appProvider.register();
+            await appProvider.boot();
         } catch (e) {
-            // QueueServiceProvider boot failed, continue anyway
+            // AppServiceProvider boot failed, continue anyway
         }
 
         this.schedule();

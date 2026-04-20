@@ -82,11 +82,7 @@ function convertTraitClassToConfig(traitClass: ClassBasedTrait): Trait {
   const methodNames = getAllMethods(prototype);
   methodNames.forEach((methodName) => {
     if (typeof instance[methodName] === 'function') {
-      // Use the unbound prototype method so that when it is mixed into a model's
-      // prototype and called on a model instance, `this` refers to the model (not
-      // the trait instance).  A pre-bound function cannot be re-bound, which would
-      // cause `this` to be the trait instance rather than the model.
-      methods[methodName] = traitClass.prototype[methodName];
+      methods[methodName] = instance[methodName].bind(instance);
     }
   });
 

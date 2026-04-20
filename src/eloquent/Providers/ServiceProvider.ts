@@ -5,7 +5,6 @@ import {
     MiddlewareEntry,
     Middleware
 } from "@/eloquent/Middleware/middleware";
-import {Abstract} from "@/eloquent/Container/Container";
 
 export type ServiceProviderClass = new (app: Application) => ServiceProvider;
 
@@ -48,11 +47,6 @@ export abstract class ServiceProvider {
      * Register any application services.
      */
     abstract register(): void;
-
-    singleton<T>(abstract: Abstract<T>,
-              concrete: any = abstract) {
-        this.container.singleton(abstract,concrete)
-    }
 
     /**
      * Bootstrap any application services.

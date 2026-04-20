@@ -77,9 +77,3 @@ export {
     BroadcastSendCommand,
 } from './BroadcastCommands';
 
-// Documentation Commands
-export {
-    DocsGenerateCommand,
-    DocsListCommand,
-} from './DocsCommands';
-
