@@ -208,6 +208,44 @@ function validationRuleToSchema(ruleString: string): {
                     maxLength = bMax;
                 }
                 break;
+
+            // ── Cross-field comparison rules ──────────────────────────────
+            case part.startsWith('gt:'):
+                ((): void => {
+                    const otherField = part.slice('gt:'.length).trim();
+                    descParts.push(`Must be greater than \`${otherField}\``);
+                })();
+                break;
+            case part.startsWith('gte:'):
+                ((): void => {
+                    const otherField = part.slice('gte:'.length).trim();
+                    descParts.push(`Must be greater than or equal to \`${otherField}\``);
+                })();
+                break;
+            case part.startsWith('lt:'):
+                ((): void => {
+                    const otherField = part.slice('lt:'.length).trim();
+                    descParts.push(`Must be less than \`${otherField}\``);
+                })();
+                break;
+            case part.startsWith('lte:'):
+                ((): void => {
+                    const otherField = part.slice('lte:'.length).trim();
+                    descParts.push(`Must be less than or equal to \`${otherField}\``);
+                })();
+                break;
+            case part.startsWith('same:'):
+                ((): void => {
+                    const otherField = part.slice('same:'.length).trim();
+                    descParts.push(`Must match \`${otherField}\``);
+                })();
+                break;
+            case part.startsWith('different:'):
+                ((): void => {
+                    const otherField = part.slice('different:'.length).trim();
+                    descParts.push(`Must differ from \`${otherField}\``);
+                })();
+                break;
         }
     }
 
