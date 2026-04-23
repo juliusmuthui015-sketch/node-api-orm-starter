@@ -154,9 +154,20 @@ export abstract class Model {
     this.applyTraitsToInstance();
     this.fill(attributes);
     this.original = { ...this.attributes };
+    // Collect all method names defined directly on the Model base prototype
+    // so we can bind them to `target` (preserving access to this.constructor etc.)
+    // while subclass-defined methods (e.g. isThirdParty, scopes) get bound to
+    // `receiver` (the proxy) so that `this.someAttribute` resolves correctly.
+    const modelBaseProto = Model.prototype;
+
     return new Proxy(this, {
       get: (target: any, prop: PropertyKey, receiver: any) => {
         if (typeof prop === 'string') {
+          // Always return the real constructor so static property access works
+          if (prop === 'constructor') {
+            return target.constructor;
+          }
+
           // Check if it's an appended attribute
           const staticClass = target.constructor as typeof Model;
           const isAppended = staticClass.appends.includes(prop);
@@ -168,7 +179,11 @@ export abstract class Model {
           }
 
           if (prop in target && typeof target[prop] === 'function') {
-            return target[prop].bind(target);
+            // Internal Model methods: bind to target so `this.constructor` stays intact.
+            // Subclass-overridden / user-defined methods: bind to receiver (proxy)
+            // so attribute access like `this.type_of_cover` works through the proxy.
+            const isModelBaseMethod = prop in modelBaseProto;
+            return target[prop].bind(isModelBaseMethod ? target : receiver);
           }
           if (prop in target.attributes) {
             return target.attributes[prop];
@@ -1617,6 +1632,7 @@ export abstract class Model {
         table: (relationInstance as any).pivotTable,
         foreignKey: (relationInstance as any).foreignPivotKey,
         relatedKey: (relationInstance as any).relatedPivotKey,
+        pivotModel: (relationInstance as any).pivotModel,
       };
     }
 
@@ -1785,13 +1801,27 @@ export abstract class Model {
   belongsToMany<T extends Model>(
     this: any,
     model: new () => T,
-    table?: string,
+    table?: string | (new (...args: any[]) => Model) | (typeof Model),
     foreignPivotKey?: string,
     relatedPivotKey?: string,
   ): BelongsToMany<T> {
     const parentTable = (this.constructor as typeof Model).getTable();
     const relatedTable = (model as unknown as typeof Model).getTable();
-    const pivotTable = table || [parentTable, relatedTable].sort().join('_');
+
+    // Detect if `table` is a pivot Model class (has static getTable) or a plain string
+    let pivotTable: string;
+    let pivotModel: typeof Model | undefined;
+    if (table && typeof table === 'function' && typeof (table as any).getTable === 'function') {
+      pivotModel = table as unknown as typeof Model;
+      // Ensure pivot model traits (e.g. SoftDeletes) are booted so flags are set
+      if (typeof (pivotModel as any).ensureBooted === 'function') {
+        (pivotModel as any).ensureBooted();
+      }
+      pivotTable = (pivotModel as typeof Model).getTable();
+    } else {
+      pivotTable = (table as string | undefined) || [parentTable, relatedTable].sort().join('_');
+    }
+
     const foreignKey = foreignPivotKey || `${parentTable}_id`;
     const relatedKey = relatedPivotKey || `${relatedTable}_id`;
     const parentPrimaryKey = (this.constructor as any).primaryKey || 'id';
@@ -1804,6 +1834,7 @@ export abstract class Model {
       parentPrimaryKey,
       relatedPrimaryKey,
       this,
+      pivotModel,
     );
   }
 

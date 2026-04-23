@@ -16,6 +16,7 @@ export interface RelationshipConfig {
   morphName?: string;
   table?: string;
   through?: typeof Model;
+  pivotModel?: typeof Model;
 }
 
 export interface Casts {

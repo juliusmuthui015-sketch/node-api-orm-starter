@@ -1759,6 +1759,15 @@ export class EloquentBuilder<T extends Model> {
       relatedPK: string,
       options: EagerLoadOptions,
   ): Promise<void> {
+    // Ensure traits (e.g. SoftDeletes, global scopes) are booted on related + pivot models
+    if (typeof (relatedModel as any).ensureBooted === 'function') {
+      (relatedModel as any).ensureBooted();
+    }
+    const pivotModel: typeof Model | undefined = rel.pivotModel;
+    if (pivotModel && typeof (pivotModel as any).ensureBooted === 'function') {
+      (pivotModel as any).ensureBooted();
+    }
+
     // SQL implementation (no Mongo calls). Mongo handled separately in loadBelongsToManyMongo.
     const pivotTable = rel.table;
     const parentPK = (this.model as any).primaryKey || 'id';
@@ -1779,6 +1788,25 @@ export class EloquentBuilder<T extends Model> {
     const parentPlaceholders = parentIds.map(() => '?').join(',');
     let pivotSql = `SELECT ${foreignPivotKey} AS parent_id, ${relatedPivotKey} AS related_id FROM ${pivotTable} WHERE ${foreignPivotKey} IN (${parentPlaceholders})`;
     const pivotParams: any[] = [...parentIds];
+
+    // Apply pivot model filters (soft deletes + global scopes) when a pivot model class was provided
+    if (pivotModel) {
+      // Soft deletes on pivot
+      if ((pivotModel as any).softDeletes) {
+        pivotSql += ' AND deleted_at IS NULL';
+      }
+      // Global scopes on pivot model
+      const globalScopes = (pivotModel as any).globalScopes as Record<string, (b: EloquentBuilder<any>) => void> | undefined;
+      if (globalScopes && Object.keys(globalScopes).length) {
+        const pivotBuilder = new EloquentBuilder(pivotModel);
+        Object.values(globalScopes).forEach((scope) => scope(pivotBuilder));
+        const scopeWhere = (pivotBuilder as any).buildWhereClause() as { sql: string; params: any[] };
+        if (scopeWhere.sql) {
+          pivotSql += scopeWhere.sql.replace(/^\s*WHERE\s*/i, ' AND ');
+          pivotParams.push(...scopeWhere.params);
+        }
+      }
+    }
 
     // Apply constraints to related rows after pivot fetch (not to pivot query itself)
     const pivotRows = await this.runQuery<any>(pivotSql, pivotParams);
@@ -1838,6 +1866,15 @@ export class EloquentBuilder<T extends Model> {
       relatedPK: string,
       options: EagerLoadOptions,
   ): Promise<void> {
+    // Ensure traits (e.g. SoftDeletes) are booted on related + pivot models
+    if (typeof (relatedModel as any).ensureBooted === 'function') {
+      (relatedModel as any).ensureBooted();
+    }
+    const pivotModel: typeof Model | undefined = rel.pivotModel;
+    if (pivotModel && typeof (pivotModel as any).ensureBooted === 'function') {
+      (pivotModel as any).ensureBooted();
+    }
+
     const pivotTable = rel.table;
     const parentPK = (this.model as any).primaryKey || 'id';
     const foreignPivotKey = rel.foreignKey || `${(this.model as any).getTable()}_id`;
@@ -1854,7 +1891,27 @@ export class EloquentBuilder<T extends Model> {
             ? Array.from(new Set(parentRaw.flatMap((v) => this.expandIdForms(v))))
             : Array.from(new Set(parentRaw));
     const pc = mongoCollection(pivotTable);
-    const pivots = await pc.find({ [foreignPivotKey]: { $in: parentMatch } }).toArray();
+
+    // Build pivot filter — start with parent match then layer on pivot model filters
+    const pivotFilter: any = { [foreignPivotKey]: { $in: parentMatch } };
+    if (pivotModel) {
+      // Soft deletes on pivot
+      if ((pivotModel as any).softDeletes) {
+        pivotFilter.deleted_at = null;
+      }
+      // Global scopes on pivot model (Mongo)
+      const globalScopes = (pivotModel as any).globalScopes as Record<string, (b: EloquentBuilder<any>) => void> | undefined;
+      if (globalScopes && Object.keys(globalScopes).length) {
+        const pivotBuilder = new EloquentBuilder(pivotModel);
+        Object.values(globalScopes).forEach((scope) => scope(pivotBuilder));
+        const scopeFilter = (pivotBuilder as any).buildMongoFilter() as Record<string, any>;
+        if (scopeFilter && Object.keys(scopeFilter).length) {
+          Object.assign(pivotFilter, scopeFilter);
+        }
+      }
+    }
+
+    const pivots = await pc.find(pivotFilter).toArray();
     if (!pivots.length) {
       models.forEach((m) => this.setRelation(m, relation, []));
       return;

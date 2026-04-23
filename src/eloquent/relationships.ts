@@ -143,6 +143,17 @@ export class HasOne<T extends Model> extends Relation<T> {
     return await this.builder.first();
   }
 
+  /**
+   * Override base `first()` to ensure the FK constraint is applied before
+   * querying, the same way `getResults()` does. The base class calls
+   * `this.builder.first()` directly without any WHERE clause.
+   */
+  async first(): Promise<T | null> {
+    const localValue = (this.parent as any).getAttribute(this.localKey);
+    if (localValue === undefined || localValue === null) return null;
+    return await this.builder.where(this.foreignKey, localValue).first();
+  }
+
   // HasOne specific methods
   async create(attributes: Record<string, any>): Promise<T> {
     const foreignValue = (this.parent as any).getAttribute(this.localKey);
@@ -207,6 +218,16 @@ export class HasMany<T extends Model> extends Relation<T> {
 
     this.builder.where(this.foreignKey, localValue);
     return await this.builder.get();
+  }
+
+  /**
+   * Override base `first()` to ensure the FK constraint is applied
+   * before querying (base class skips the FK WHERE clause).
+   */
+  async first(): Promise<T | null> {
+    const localValue = (this.parent as any).getAttribute(this.localKey);
+    if (localValue === undefined || localValue === null) return null;
+    return await this.builder.where(this.foreignKey, localValue).first();
   }
 
   // HasMany specific methods
@@ -424,6 +445,16 @@ export class BelongsTo<T extends Model> extends Relation<T> {
     return await this.builder.first();
   }
 
+  /**
+   * Override base `first()` to ensure the owner-key constraint is applied
+   * before querying (base class skips the WHERE clause).
+   */
+  async first(): Promise<T | null> {
+    const foreignValue = (this.parent as any).getAttribute(this.foreignKey);
+    if (foreignValue === undefined || foreignValue === null) return null;
+    return await this.builder.where(this.ownerKey, foreignValue).first();
+  }
+
   // BelongsTo specific methods
   async associate(model: T | number | string | null): Promise<void> {
     if (model === null) {
@@ -474,8 +505,63 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
     private parentPrimaryKey: string = 'id',
     private relatedPrimaryKey: string = 'id',
     parent: Model,
+    public pivotModel?: typeof Model,
   ) {
     super(relatedModel, parent);
+    // Ensure pivot model traits are booted so softDeletes flag is set
+    if (pivotModel && typeof (pivotModel as any).ensureBooted === 'function') {
+      (pivotModel as any).ensureBooted();
+    }
+  }
+
+  /** Returns true when the pivot model has the SoftDeletes trait applied */
+  private get pivotSoftDeletes(): boolean {
+    return !!(this.pivotModel && (this.pivotModel as any).softDeletes);
+  }
+
+  /**
+   * Build the extra WHERE conditions from the pivot model's soft deletes + global scopes (SQL).
+   * Returns { sql, params } where sql is a fragment like ' AND deleted_at IS NULL AND ...'
+   */
+  private buildPivotModelFiltersSQL(): { sql: string; params: any[] } {
+    if (!this.pivotModel) return { sql: '', params: [] };
+    let sql = '';
+    const params: any[] = [];
+    if (this.pivotSoftDeletes) {
+      sql += ' AND deleted_at IS NULL';
+    }
+    const globalScopes = (this.pivotModel as any).globalScopes as Record<string, (b: EloquentBuilder<any>) => void> | undefined;
+    if (globalScopes && Object.keys(globalScopes).length) {
+      const b = new EloquentBuilder(this.pivotModel!);
+      Object.values(globalScopes).forEach((scope) => scope(b));
+      const w = (b as any).buildWhereClause() as { sql: string; params: any[] };
+      if (w.sql) {
+        sql += w.sql.replace(/^\s*WHERE\s*/i, ' AND ');
+        params.push(...w.params);
+      }
+    }
+    return { sql, params };
+  }
+
+  /**
+   * Build the extra filter conditions from the pivot model's soft deletes + global scopes (MongoDB).
+   */
+  private buildPivotModelFiltersMongo(): Record<string, any> {
+    if (!this.pivotModel) return {};
+    const filter: Record<string, any> = {};
+    if (this.pivotSoftDeletes) {
+      filter.deleted_at = null;
+    }
+    const globalScopes = (this.pivotModel as any).globalScopes as Record<string, (b: EloquentBuilder<any>) => void> | undefined;
+    if (globalScopes && Object.keys(globalScopes).length) {
+      const b = new EloquentBuilder(this.pivotModel!);
+      Object.values(globalScopes).forEach((scope) => scope(b));
+      const scopeFilter = (b as any).buildMongoFilter() as Record<string, any>;
+      if (scopeFilter && Object.keys(scopeFilter).length) {
+        Object.assign(filter, scopeFilter);
+      }
+    }
+    return filter;
   }
 
   async getResults(): Promise<T[]> {
@@ -488,6 +574,8 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
       const pidNum = parseInt(pidStr, 10);
       const parentMatch: any[] = isNaN(pidNum) ? [pidStr] : [pidStr, pidNum];
       const pivotFilter: any = { [this.foreignPivotKey]: { $in: parentMatch } };
+      // Apply pivot model filters (soft deletes + global scopes)
+      Object.assign(pivotFilter, this.buildPivotModelFiltersMongo());
       this.pivotWheres.forEach((w) => {
         const op = (w.operator || '=').toLowerCase();
         const m =
@@ -542,7 +630,12 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
     }
 
     pivotSql += ` FROM ${this.pivotTable} WHERE ${this.foreignPivotKey} = ?`;
-    const pivotParams: any[] = [parentId];
+    // Apply pivot model filters (soft deletes + global scopes)
+    const pivotModelFilters = this.buildPivotModelFiltersSQL();
+    if (pivotModelFilters.sql) {
+      pivotSql += pivotModelFilters.sql;
+    }
+    const pivotParams: any[] = [parentId, ...pivotModelFilters.params];
 
     // Add pivot where conditions
     this.pivotWheres.forEach((where) => {
