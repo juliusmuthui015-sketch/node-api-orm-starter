@@ -8,7 +8,7 @@
 |
 */
 
-import { EventSubscriber } from '@/eloquent/Core';
+import { EventSubscriber } from "@/eloquent/Core";
 
 /*
 |--------------------------------------------------------------------------
@@ -18,16 +18,16 @@ import { EventSubscriber } from '@/eloquent/Core';
 
 // Store listener metadata for auto-discovery
 interface ListenerMetadata {
-    events: string[];
-    shouldQueue: boolean;
-    queueConfig?: {
-        connection?: string;
-        queue?: string;
-        delay?: number;
-        tries?: number;
-        timeout?: number;
-    };
-    afterCommit: boolean;
+  events: string[];
+  shouldQueue: boolean;
+  queueConfig?: {
+    connection?: string;
+    queue?: string;
+    delay?: number;
+    tries?: number;
+    timeout?: number;
+  };
+  afterCommit: boolean;
 }
 
 const listenerRegistry: Map<new () => any, ListenerMetadata> = new Map();
@@ -53,20 +53,20 @@ const eventClassRegistry: Map<string, new (...args: any[]) => any> = new Map();
 */
 
 export function ListensTo(events: string | string[]) {
-    return function <T extends new (...args: any[]) => any>(constructor: T) {
-        const eventList = Array.isArray(events) ? events : [events];
+  return function <T extends new (...args: any[]) => any>(constructor: T) {
+    const eventList = Array.isArray(events) ? events : [events];
 
-        const existing = listenerRegistry.get(constructor) || {
-            events: [],
-            shouldQueue: false,
-            afterCommit: false,
-        };
-
-        existing.events = [...new Set([...existing.events, ...eventList])];
-        listenerRegistry.set(constructor, existing);
-
-        return constructor;
+    const existing = listenerRegistry.get(constructor) || {
+      events: [],
+      shouldQueue: false,
+      afterCommit: false,
     };
+
+    existing.events = [...new Set([...existing.events, ...eventList])];
+    listenerRegistry.set(constructor, existing);
+
+    return constructor;
+  };
 }
 
 /*
@@ -88,27 +88,27 @@ export function ListensTo(events: string | string[]) {
 */
 
 export interface ShouldQueueOptions {
-    connection?: string;
-    queue?: string;
-    delay?: number;
-    tries?: number;
-    timeout?: number;
+  connection?: string;
+  queue?: string;
+  delay?: number;
+  tries?: number;
+  timeout?: number;
 }
 
 export function ShouldQueue(options: ShouldQueueOptions = {}) {
-    return function <T extends new (...args: any[]) => any>(constructor: T) {
-        const existing = listenerRegistry.get(constructor) || {
-            events: [],
-            shouldQueue: false,
-            afterCommit: false,
-        };
-
-        existing.shouldQueue = true;
-        existing.queueConfig = options;
-        listenerRegistry.set(constructor, existing);
-
-        return constructor;
+  return function <T extends new (...args: any[]) => any>(constructor: T) {
+    const existing = listenerRegistry.get(constructor) || {
+      events: [],
+      shouldQueue: false,
+      afterCommit: false,
     };
+
+    existing.shouldQueue = true;
+    existing.queueConfig = options;
+    listenerRegistry.set(constructor, existing);
+
+    return constructor;
+  };
 }
 
 /*
@@ -127,18 +127,18 @@ export function ShouldQueue(options: ShouldQueueOptions = {}) {
 */
 
 export function AfterCommit() {
-    return function <T extends new (...args: any[]) => any>(constructor: T) {
-        const existing = listenerRegistry.get(constructor) || {
-            events: [],
-            shouldQueue: false,
-            afterCommit: false,
-        };
-
-        existing.afterCommit = true;
-        listenerRegistry.set(constructor, existing);
-
-        return constructor;
+  return function <T extends new (...args: any[]) => any>(constructor: T) {
+    const existing = listenerRegistry.get(constructor) || {
+      events: [],
+      shouldQueue: false,
+      afterCommit: false,
     };
+
+    existing.afterCommit = true;
+    listenerRegistry.set(constructor, existing);
+
+    return constructor;
+  };
 }
 
 /*
@@ -160,10 +160,10 @@ export function AfterCommit() {
 */
 
 export function Subscriber() {
-    return function <T extends new (...args: any[]) => EventSubscriber>(constructor: T) {
-        subscriberRegistry.add(constructor);
-        return constructor;
-    };
+  return function <T extends new (...args: any[]) => EventSubscriber>(constructor: T) {
+    subscriberRegistry.add(constructor);
+    return constructor;
+  };
 }
 
 /*
@@ -180,14 +180,14 @@ export function Subscriber() {
 */
 
 export function EventName(name: string) {
-    return function <T extends new (...args: any[]) => any>(constructor: T) {
-        eventClassRegistry.set(name, constructor);
+  return function <T extends new (...args: any[]) => any>(constructor: T) {
+    eventClassRegistry.set(name, constructor);
 
-        // Also set a static property on the class
-        (constructor as any).eventName = name;
+    // Also set a static property on the class
+    (constructor as any).eventName = name;
 
-        return constructor;
-    };
+    return constructor;
+  };
 }
 
 /*
@@ -200,51 +200,51 @@ export function EventName(name: string) {
  * Get all registered listeners with their metadata.
  */
 export function getRegisteredListeners(): Map<new () => any, ListenerMetadata> {
-    return listenerRegistry;
+  return listenerRegistry;
 }
 
 /**
  * Get all registered subscribers.
  */
 export function getRegisteredSubscribers(): Set<new () => EventSubscriber> {
-    return subscriberRegistry;
+  return subscriberRegistry;
 }
 
 /**
  * Get all registered event classes.
  */
 export function getRegisteredEventClasses(): Map<string, new (...args: any[]) => any> {
-    return eventClassRegistry;
+  return eventClassRegistry;
 }
 
 /**
  * Get listener metadata for a specific class.
  */
 export function getListenerMetadata(listenerClass: new () => any): ListenerMetadata | undefined {
-    return listenerRegistry.get(listenerClass);
+  return listenerRegistry.get(listenerClass);
 }
 
 /**
  * Check if a class is a registered listener.
  */
 export function isRegisteredListener(listenerClass: new () => any): boolean {
-    return listenerRegistry.has(listenerClass);
+  return listenerRegistry.has(listenerClass);
 }
 
 /**
  * Check if a class is a registered subscriber.
  */
 export function isRegisteredSubscriber(subscriberClass: new () => EventSubscriber): boolean {
-    return subscriberRegistry.has(subscriberClass);
+  return subscriberRegistry.has(subscriberClass);
 }
 
 /**
  * Clear all registries (useful for testing).
  */
 export function clearEventRegistries(): void {
-    listenerRegistry.clear();
-    subscriberRegistry.clear();
-    eventClassRegistry.clear();
+  listenerRegistry.clear();
+  subscriberRegistry.clear();
+  eventClassRegistry.clear();
 }
 
 /*
@@ -257,28 +257,28 @@ export function clearEventRegistries(): void {
  * Get all listeners for a specific event.
  */
 export function getListenersForEvent(eventName: string): Array<new () => any> {
-    const listeners: Array<new () => any> = [];
+  const listeners: Array<new () => any> = [];
 
-    for (const [listenerClass, metadata] of listenerRegistry) {
-        if (metadata.events.includes(eventName) || metadata.events.some(e => matchesWildcard(e, eventName))) {
-            listeners.push(listenerClass);
-        }
+  for (const [listenerClass, metadata] of listenerRegistry) {
+    if (
+      metadata.events.includes(eventName) ||
+      metadata.events.some((e) => matchesWildcard(e, eventName))
+    ) {
+      listeners.push(listenerClass);
     }
+  }
 
-    return listeners;
+  return listeners;
 }
 
 /**
  * Check if a pattern matches an event name (supports wildcards).
  */
 function matchesWildcard(pattern: string, event: string): boolean {
-    if (!pattern.includes('*')) {
-        return pattern === event;
-    }
+  if (!pattern.includes("*")) {
+    return pattern === event;
+  }
 
-    const regex = new RegExp(
-        '^' + pattern.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$'
-    );
-    return regex.test(event);
+  const regex = new RegExp("^" + pattern.replace(/\./g, "\\.").replace(/\*/g, ".*") + "$");
+  return regex.test(event);
 }
-

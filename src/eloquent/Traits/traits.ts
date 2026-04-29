@@ -1,7 +1,7 @@
 // traits.ts - New file for trait system
 // traits.ts - Enhanced with class-based trait support
-import { Model } from '@/eloquent/Model';
-import { EloquentBuilder } from '@/eloquent/EloquentBuilder';
+import { Model } from "@/eloquent/Model";
+import { EloquentBuilder } from "@/eloquent/EloquentBuilder";
 
 export interface TraitMethods {
   [methodName: string]: Function;
@@ -76,12 +76,12 @@ function convertTraitClassToConfig(traitClass: ClassBasedTrait): Trait {
       methods.push(...Object.getOwnPropertyNames(obj));
       obj = Object.getPrototypeOf(obj);
     }
-    return methods.filter((method) => method !== 'constructor');
+    return methods.filter((method) => method !== "constructor");
   };
 
   const methodNames = getAllMethods(prototype);
   methodNames.forEach((methodName) => {
-    if (typeof instance[methodName] === 'function') {
+    if (typeof instance[methodName] === "function") {
       // Use the unbound prototype method so that when it is mixed into a model's
       // prototype and called on a model instance, `this` refers to the model (not
       // the trait instance).  A pre-bound function cannot be re-bound, which would
@@ -100,12 +100,12 @@ function convertTraitClassToConfig(traitClass: ClassBasedTrait): Trait {
   const macros: { [name: string]: Function } = {};
 
   staticProperties.forEach((prop) => {
-    if (prop === 'length' || prop === 'name' || prop === 'prototype') return;
+    if (prop === "length" || prop === "name" || prop === "prototype") return;
 
     const value = (traitClass as any)[prop];
-    if (typeof value === 'function') {
+    if (typeof value === "function") {
       // Check if it's a scope method (starts with 'scope')
-      if (prop.startsWith('scope') && prop.length > 5) {
+      if (prop.startsWith("scope") && prop.length > 5) {
         const scopeName = prop.charAt(5).toLowerCase() + prop.slice(6);
         scopeMethods[scopeName] = value;
       } else {
@@ -124,12 +124,12 @@ function convertTraitClassToConfig(traitClass: ClassBasedTrait): Trait {
   }
 
   // Check for boot method
-  if (typeof (traitClass as any).boot === 'function') {
+  if (typeof (traitClass as any).boot === "function") {
     traitConfig.boot = (traitClass as any).boot;
   }
 
   // Also check for boot method on instance
-  if (typeof instance.boot === 'function') {
+  if (typeof instance.boot === "function") {
     const originalBoot = traitConfig.boot;
     traitConfig.boot = (model: typeof Model) => {
       if (originalBoot) originalBoot(model);
@@ -150,7 +150,7 @@ export function applyTraits(
   for (const traitRef of traitNamesOrClasses) {
     let trait: Trait | undefined;
 
-    if (typeof traitRef === 'string') {
+    if (typeof traitRef === "string") {
       // String trait name
       trait = traitRegistry.get(traitRef);
       if (!trait) {
@@ -266,8 +266,8 @@ export function scopeMethod(): MethodDecorator {
     propertyKey: string | symbol,
     descriptor: PropertyDescriptor,
   ): void {
-    if (typeof propertyKey === 'string') {
-      if (propertyKey.startsWith('scope') && propertyKey.length > 5) {
+    if (typeof propertyKey === "string") {
+      if (propertyKey.startsWith("scope") && propertyKey.length > 5) {
         const scopeName = propertyKey.charAt(5).toLowerCase() + propertyKey.slice(6);
         const ctor = (target as any).constructor as Function & {
           __scopes?: Record<string, Function>;
@@ -291,7 +291,7 @@ export function macroMethod(): MethodDecorator {
     propertyKey: string | symbol,
     descriptor: PropertyDescriptor,
   ): void {
-    if (typeof propertyKey === 'string') {
+    if (typeof propertyKey === "string") {
       const ctor = (target as any).constructor as Function & {
         __macros?: Record<string, Function>;
       };
@@ -314,7 +314,7 @@ export function markAsScope(
   propertyKey: string,
   descriptor?: PropertyDescriptor,
 ): void {
-  if (propertyKey.startsWith('scope') && propertyKey.length > 5) {
+  if (propertyKey.startsWith("scope") && propertyKey.length > 5) {
     const scopeName = propertyKey.charAt(5).toLowerCase() + propertyKey.slice(6);
     const ctor = target.constructor as Function & { __scopes?: Record<string, Function> };
     ctor.__scopes = ctor.__scopes || {};
@@ -340,7 +340,7 @@ export function markAsMacro(
  */
 
 // SoftDeletes trait
-registerTrait('SoftDeletes', {
+registerTrait("SoftDeletes", {
   methods: {
     /**
      * Force delete the model (bypass soft delete)
@@ -378,15 +378,15 @@ registerTrait('SoftDeletes', {
 });
 
 // HasApiTokens trait (similar to Laravel Sanctum)
-registerTrait('HasApiTokens', {
+registerTrait("HasApiTokens", {
   methods: {
     /**
      * Create a new token for the user
      */
-    async createToken(this: Model, name: string, abilities: string[] = ['*']): Promise<any> {
+    async createToken(this: Model, name: string, abilities: string[] = ["*"]): Promise<any> {
       // Implementation would depend on your token system
       console.log(`Creating token "${name}" with abilities:`, abilities);
-      return { token: 'generated-token' };
+      return { token: "generated-token" };
     },
 
     /**
@@ -407,19 +407,19 @@ registerTrait('HasApiTokens', {
      * Revoke all tokens
      */
     async revokeAllTokens(this: Model): Promise<void> {
-      console.log('All tokens revoked');
+      console.log("All tokens revoked");
     },
   },
 });
 
 // Notifiable trait (similar to Laravel Notifications)
-registerTrait('Notifiable', {
+registerTrait("Notifiable", {
   methods: {
     /**
      * Send notification
      */
     async notify(this: Model, notification: any): Promise<void> {
-      console.log('Notification sent:', notification);
+      console.log("Notification sent:", notification);
     },
 
     /**
@@ -439,7 +439,7 @@ registerTrait('Notifiable', {
 });
 
 // HasEvents trait (for model events)
-registerTrait('HasEvents', {
+registerTrait("HasEvents", {
   boot: (modelClass: typeof Model) => {
     // Initialize event listeners map on the specific model class.
     // If the class inherits the base Model.eventListeners object (shared), clone it
@@ -484,9 +484,9 @@ registerTrait('HasEvents', {
     if (!(modelClass as any).on) {
       (modelClass as any).on = function (event: string, callback: Function) {
         // Use addEventListener on the class/ prototype
-        if (typeof (this as any).addEventListener === 'function') {
+        if (typeof (this as any).addEventListener === "function") {
           (this as any).addEventListener(event, callback);
-        } else if (typeof (modelClass as any).addEventListener === 'function') {
+        } else if (typeof (modelClass as any).addEventListener === "function") {
           (modelClass as any).addEventListener(event, callback);
         }
         return this;

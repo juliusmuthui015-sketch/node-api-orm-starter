@@ -1,92 +1,118 @@
-import { QueueDriverInterface, SerializedJob } from '../types';
+import { QueueDriverInterface, SerializedJob } from "../types";
+import queueConfig from "@/config/queue.config";
 
 /*
 |--------------------------------------------------------------------------
 | Sync Queue Driver
 |--------------------------------------------------------------------------
 |
-| This driver executes jobs synchronously, useful for local development
-| or when you don't need background processing.
+| Executes jobs synchronously — useful for local development or testing.
+| Respects maxTries and backoff; retries happen inline without real delays.
 |
 */
 
 export class SyncDriver implements QueueDriverInterface {
-    private jobs: Map<string, SerializedJob[]> = new Map();
+  private jobs: Map<string, SerializedJob[]> = new Map();
 
-    async size(queue: string = 'default'): Promise<number> {
-        return this.jobs.get(queue)?.length || 0;
-    }
+  async size(queue: string = "default"): Promise<number> {
+    return this.jobs.get(queue)?.length ?? 0;
+  }
 
-    async push(job: SerializedJob, queue: string = 'default'): Promise<string> {
-        // For sync driver, we execute immediately
-        // But we still need to maintain the queue for inspection
-        if (!this.jobs.has(queue)) {
-            this.jobs.set(queue, []);
-        }
+  async push(job: SerializedJob, queue: string = "default"): Promise<string> {
+    if (!this.jobs.has(queue)) this.jobs.set(queue, []);
 
-        // Execute the job immediately
-        const { Job: JobBase } = await require('../Job');
-        const jobInstance = JobBase.deserialize(job);
+    const { Job: JobBase } = await require("../Job");
 
-        if (jobInstance) {
-            try {
-                await jobInstance.handle();
-            } catch (error) {
-                console.error(`[Sync] Job ${job.displayName} failed:`, error);
-                jobInstance.failed(error as Error);
-                throw error;
-            }
-        }
+    const maxTries = job.maxTries || queueConfig.defaults.tries;
+    const maxExceptions = job.maxExceptions ?? queueConfig.defaults.maxExceptions;
 
+    let lastError: Error | null = null;
+
+    while (job.attempts < maxTries && (job.exceptionCount ?? 0) < maxExceptions) {
+      job.attempts += 1;
+      job.exceptionCount = (job.exceptionCount ?? 0);
+
+      const instance = JobBase.deserialize(job);
+      if (!instance) break;
+
+      try {
+        await instance.handle();
+        // Success — stop retrying
         return job.id;
+      } catch (error) {
+        lastError = error as Error;
+        job.exceptionCount += 1;
+
+        const shouldRetry =
+          job.attempts < maxTries && job.exceptionCount < maxExceptions;
+
+        if (!shouldRetry) break;
+
+        // Sync driver: no real delay between retries
+        console.warn(
+          `[Sync] Job ${job.displayName} failed (attempt ${job.attempts}/${maxTries}), retrying...`,
+        );
+      }
     }
 
-    async later(delay: number, job: SerializedJob, queue: string = 'default'): Promise<string> {
-        // For sync driver, we execute after the delay using setTimeout
-        return new Promise((resolve) => {
-            setTimeout(async () => {
-                await this.push(job, queue);
-                resolve(job.id);
-            }, delay * 1000);
-        });
-    }
-
-    async pop(queue: string = 'default'): Promise<SerializedJob | null> {
-        const jobs = this.jobs.get(queue);
-        if (!jobs || jobs.length === 0) {
-            return null;
+    // Permanent failure
+    if (lastError) {
+      console.error(
+        `[Sync] Job ${job.displayName} failed permanently after ${job.attempts} attempt(s):`,
+        lastError.message,
+      );
+      const instance = JobBase.deserialize(job);
+      if (instance) {
+        try {
+          instance.failed(lastError);
+        } catch {
+          // swallow errors from failed()
         }
-        return jobs.shift() || null;
+      }
+      throw lastError;
     }
 
-    async delete(job: SerializedJob, queue: string = 'default'): Promise<void> {
-        const jobs = this.jobs.get(queue);
-        if (jobs) {
-            const index = jobs.findIndex(j => j.id === job.id);
-            if (index > -1) {
-                jobs.splice(index, 1);
-            }
-        }
-    }
+    return job.id;
+  }
 
-    async release(job: SerializedJob, delay: number, queue: string = 'default'): Promise<void> {
-        job.availableAt = Date.now() + (delay * 1000);
-        job.reservedAt = null;
+  async later(delay: number, job: SerializedJob, queue: string = "default"): Promise<string> {
+    // Fire-and-forget — does not block the caller
+    setTimeout(() => {
+      this.push(job, queue).catch((err) => {
+        console.error(`[Sync] Delayed job ${job.displayName} failed:`, err);
+      });
+    }, delay * 1000);
+    return job.id;
+  }
 
-        if (!this.jobs.has(queue)) {
-            this.jobs.set(queue, []);
-        }
-        this.jobs.get(queue)!.push(job);
-    }
+  async pop(queue: string = "default"): Promise<SerializedJob | null> {
+    const jobs = this.jobs.get(queue);
+    if (!jobs || jobs.length === 0) return null;
+    return jobs.shift() ?? null;
+  }
 
-    async clear(queue: string = 'default'): Promise<number> {
-        const count = this.jobs.get(queue)?.length || 0;
-        this.jobs.set(queue, []);
-        return count;
+  async delete(job: SerializedJob, queue: string = "default"): Promise<void> {
+    const jobs = this.jobs.get(queue);
+    if (jobs) {
+      const index = jobs.findIndex((j) => j.id === job.id);
+      if (index > -1) jobs.splice(index, 1);
     }
+  }
 
-    async getJobs(queue: string = 'default'): Promise<SerializedJob[]> {
-        return this.jobs.get(queue) || [];
-    }
+  async release(job: SerializedJob, delay: number, queue: string = "default"): Promise<void> {
+    job.availableAt = Date.now() + delay * 1000;
+    job.reservedAt = null;
+    if (!this.jobs.has(queue)) this.jobs.set(queue, []);
+    this.jobs.get(queue)!.push(job);
+  }
+
+  async clear(queue: string = "default"): Promise<number> {
+    const count = this.jobs.get(queue)?.length ?? 0;
+    this.jobs.set(queue, []);
+    return count;
+  }
+
+  async getJobs(queue: string = "default"): Promise<SerializedJob[]> {
+    return this.jobs.get(queue) ?? [];
+  }
 }
-

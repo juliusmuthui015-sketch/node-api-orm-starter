@@ -1,8 +1,8 @@
-import { Router, RequestHandler, Request, Response } from 'express';
-import { resolveMiddleware } from '@/eloquent/Middleware/middleware';
-import { Model } from '@/eloquent/Model';
-import { EloquentBuilder } from '@/eloquent/EloquentBuilder';
-import { container } from '@/eloquent/Container/Container';
+import { Router, RequestHandler, Request, Response } from "express";
+import { resolveMiddleware } from "@/eloquent/Middleware/middleware";
+import { Model } from "@/eloquent/Model";
+import { EloquentBuilder } from "@/eloquent/EloquentBuilder";
+import { container } from "@/eloquent/Container/Container";
 
 // Type for controller method with model injection
 type ControllerMethod =
@@ -10,19 +10,15 @@ type ControllerMethod =
   | ((req: any, res: any, next: any, ...models: any[]) => any);
 type ControllerConstructor<T = any> = new (...args: any[]) => T;
 
-type ControllerMethodTuple<T extends ControllerConstructor> = [
-  T,
-  keyof InstanceType<T>
-];
-
+type ControllerMethodTuple<T extends ControllerConstructor> = [T, keyof InstanceType<T>];
 
 export type HandlerOrAlias =
-    | RequestHandler
-    | ControllerMethod
-    | string
-    | ControllerConstructor
-    | ControllerMethodTuple<ControllerConstructor>
-    | Array<RequestHandler | ControllerMethod | string>;
+  | RequestHandler
+  | ControllerMethod
+  | string
+  | ControllerConstructor
+  | ControllerMethodTuple<ControllerConstructor>
+  | Array<RequestHandler | ControllerMethod | string>;
 export type GroupOptions = {
   prefix?: string;
   middleware?: RequestHandler | RequestHandler[] | string | string[];
@@ -36,11 +32,25 @@ export type PrefixFluent = {
   middleware(
     mw: RequestHandler | RequestHandler[] | string | string[],
     cb?: (rb: RouterBuilder) => void,
-  ): RouterBuilder | { group(cb: (rb: RouterBuilder) => void): RouterBuilder; withoutMiddleware(mw: RequestHandler | RequestHandler[] | string | string[]): { group(cb: (rb: RouterBuilder) => void): RouterBuilder } };
+  ):
+    | RouterBuilder
+    | {
+        group(cb: (rb: RouterBuilder) => void): RouterBuilder;
+        withoutMiddleware(mw: RequestHandler | RequestHandler[] | string | string[]): {
+          group(cb: (rb: RouterBuilder) => void): RouterBuilder;
+        };
+      };
   withoutMiddleware(
     mw: RequestHandler | RequestHandler[] | string | string[],
     cb?: (rb: RouterBuilder) => void,
-  ): RouterBuilder | { group(cb: (rb: RouterBuilder) => void): RouterBuilder; middleware(mw: RequestHandler | RequestHandler[] | string | string[]): { group(cb: (rb: RouterBuilder) => void): RouterBuilder } };
+  ):
+    | RouterBuilder
+    | {
+        group(cb: (rb: RouterBuilder) => void): RouterBuilder;
+        middleware(mw: RequestHandler | RequestHandler[] | string | string[]): {
+          group(cb: (rb: RouterBuilder) => void): RouterBuilder;
+        };
+      };
   group(cb: (rb: RouterBuilder) => void): RouterBuilder;
   name(name: string): PrefixFluent;
 };
@@ -90,13 +100,13 @@ class GlobalModelRegistry implements ModelRegistry {
     if (exactMatch) return exactMatch;
 
     // Try removing "Id" suffix
-    if (name.toLowerCase().endsWith('id')) {
+    if (name.toLowerCase().endsWith("id")) {
       const baseName = name.slice(0, -2).toLowerCase();
       return this.models.get(baseName);
     }
 
     // Try singularizing if it looks plural
-    if (name.toLowerCase().endsWith('s')) {
+    if (name.toLowerCase().endsWith("s")) {
       const singular = this.singularize(name.toLowerCase());
       return this.models.get(singular);
     }
@@ -109,33 +119,33 @@ class GlobalModelRegistry implements ModelRegistry {
   }
 
   private pluralize(word: string): string {
-    if (word.endsWith('y')) {
-      return word.slice(0, -1) + 'ies';
+    if (word.endsWith("y")) {
+      return word.slice(0, -1) + "ies";
     } else if (
-      word.endsWith('s') ||
-      word.endsWith('x') ||
-      word.endsWith('z') ||
-      word.endsWith('ch') ||
-      word.endsWith('sh')
+      word.endsWith("s") ||
+      word.endsWith("x") ||
+      word.endsWith("z") ||
+      word.endsWith("ch") ||
+      word.endsWith("sh")
     ) {
-      return word + 'es';
+      return word + "es";
     }
-    return word + 's';
+    return word + "s";
   }
 
   private singularize(word: string): string {
-    if (word.endsWith('ies')) {
-      return word.slice(0, -3) + 'y';
+    if (word.endsWith("ies")) {
+      return word.slice(0, -3) + "y";
     } else if (
-      word.endsWith('es') &&
-      (word.endsWith('sses') ||
-        word.endsWith('xes') ||
-        word.endsWith('zes') ||
-        word.endsWith('ches') ||
-        word.endsWith('shes'))
+      word.endsWith("es") &&
+      (word.endsWith("sses") ||
+        word.endsWith("xes") ||
+        word.endsWith("zes") ||
+        word.endsWith("ches") ||
+        word.endsWith("shes"))
     ) {
       return word.slice(0, -2);
-    } else if (word.endsWith('s') && !word.endsWith('ss')) {
+    } else if (word.endsWith("s") && !word.endsWith("ss")) {
       return word.slice(0, -1);
     }
     return word;
@@ -147,10 +157,10 @@ const globalModelRegistry = new GlobalModelRegistry();
 
 export class RouterBuilder {
   private router: Router;
-  private prefixStack: string[] = [''];
+  private prefixStack: string[] = [""];
   private middlewareStack: RequestHandler[][] = [[]];
   private withoutMiddlewareStack: (string | RequestHandler)[][] = [[]];
-  private nameStack: string[] = [''];
+  private nameStack: string[] = [""];
   private whereStack: RouteParameterConstraints[] = [{}];
   private namedRoutes: Map<string, NamedRoute> = new Map();
   private registeredRoutes: Array<{
@@ -160,7 +170,7 @@ export class RouterBuilder {
     middleware: string[];
     controllerRef?: { controller: any; method?: string };
   }> = [];
-  private currentRouteName: string = '';
+  private currentRouteName: string = "";
   private explicitBinders: Map<string, (value: string, route: any) => Promise<any>> = new Map();
   private fallbackHandler: FallbackHandler | null = null;
   private autoBindEnabled: boolean = true;
@@ -185,9 +195,9 @@ export class RouterBuilder {
   private normalizePath(parts: string[]) {
     const full = parts
       .filter(Boolean)
-      .map((p) => p.replace(/(^\/+|\/+$)/g, ''))
-      .join('/');
-    return '/' + full;
+      .map((p) => p.replace(/(^\/+|\/+$)/g, ""))
+      .join("/");
+    return "/" + full;
   }
 
   private applyRouteConstraints(path: string, constraints: RouteParameterConstraints): string {
@@ -200,12 +210,12 @@ export class RouterBuilder {
   }
 
   private currentPrefix() {
-    return this.prefixStack.join('');
+    return this.prefixStack.join("");
   }
 
   private currentName() {
     const names = this.nameStack.filter(Boolean);
-    return names.length > 0 ? names.join('.') : '';
+    return names.length > 0 ? names.join(".") : "";
   }
 
   private currentConstraints(): RouteParameterConstraints {
@@ -213,17 +223,23 @@ export class RouterBuilder {
   }
 
   private currentMiddlewares(): RequestHandler[] {
-    const excluded = this.withoutMiddlewareStack.reduce<(string | RequestHandler)[]>((acc, cur) => acc.concat(cur || []), []);
-    const all = this.middlewareStack.reduce<RequestHandler[]>((acc, cur) => acc.concat(cur || []), []);
+    const excluded = this.withoutMiddlewareStack.reduce<(string | RequestHandler)[]>(
+      (acc, cur) => acc.concat(cur || []),
+      [],
+    );
+    const all = this.middlewareStack.reduce<RequestHandler[]>(
+      (acc, cur) => acc.concat(cur || []),
+      [],
+    );
 
     if (excluded.length === 0) {
       return all;
     }
 
-    return all.filter(mw => {
+    return all.filter((mw) => {
       // Check if this middleware should be excluded
-      return !excluded.some(ex => {
-        if (typeof ex === 'string') {
+      return !excluded.some((ex) => {
+        if (typeof ex === "string") {
           // Compare by name/alias - need to resolve the string first
           try {
             const resolved = resolveMiddleware(ex);
@@ -244,7 +260,10 @@ export class RouterBuilder {
    * Get the current excluded middleware stack.
    */
   private currentExcludedMiddlewares(): (string | RequestHandler)[] {
-    return this.withoutMiddlewareStack.reduce<(string | RequestHandler)[]>((acc, cur) => acc.concat(cur || []), []);
+    return this.withoutMiddlewareStack.reduce<(string | RequestHandler)[]>(
+      (acc, cur) => acc.concat(cur || []),
+      [],
+    );
   }
 
   // Helper to detect ES6 class constructors vs plain functions
@@ -253,7 +272,7 @@ export class RouterBuilder {
   // is a reliable heuristic across transpiled and native code.
   private isClassConstructor(fn: any): boolean {
     try {
-      if (typeof fn !== 'function') return false;
+      if (typeof fn !== "function") return false;
       const str = Function.prototype.toString.call(fn);
       return /^class\s/.test(str);
     } catch (e) {
@@ -279,11 +298,11 @@ export class RouterBuilder {
   ): this {
     let binder: (value: string, route: any) => Promise<any>;
 
-    if (typeof binderOrModel === 'function' && (binderOrModel as any).prototype instanceof Model) {
+    if (typeof binderOrModel === "function" && (binderOrModel as any).prototype instanceof Model) {
       // It's a Model class
       const ModelClass = binderOrModel as typeof Model;
       binder = async (value: string) => {
-        const pk = ModelClass.primaryKey || 'id';
+        const pk = ModelClass.primaryKey || "id";
         const builder = new EloquentBuilder(ModelClass);
         return builder.findOrFail
           ? await builder.findOrFail(value)
@@ -308,15 +327,15 @@ export class RouterBuilder {
     let options: GroupOptions = {};
     let callback: (rb: RouterBuilder) => void;
 
-    if (typeof optionsOrCb === 'function') {
+    if (typeof optionsOrCb === "function") {
       callback = optionsOrCb;
     } else {
       options = optionsOrCb || {};
-      if (!cb) throw new Error('group(options, cb) requires a callback');
+      if (!cb) throw new Error("group(options, cb) requires a callback");
       callback = cb;
     }
 
-    const prefix = options.prefix || '';
+    const prefix = options.prefix || "";
     const raw = options.middleware
       ? Array.isArray(options.middleware)
         ? options.middleware
@@ -339,9 +358,9 @@ export class RouterBuilder {
     }
 
     // Handle name stacking
-    const name = options.name || '';
+    const name = options.name || "";
     const names = this.nameStack.filter(Boolean);
-    const newName = names.length > 0 && name ? `${names.join('.')}.${name}` : name;
+    const newName = names.length > 0 && name ? `${names.join(".")}.${name}` : name;
 
     // Handle parameter constraints stacking
     const constraints = options.where || {};
@@ -373,7 +392,7 @@ export class RouterBuilder {
     if (this.autoBindEnabled) {
       const modelClass = this.modelRegistry.getModelByName(paramName);
       if (modelClass) {
-        const pk = modelClass.primaryKey || 'id';
+        const pk = modelClass.primaryKey || "id";
         const builder = new EloquentBuilder(modelClass);
         return builder.findOrFail
           ? await builder.findOrFail(value)
@@ -400,7 +419,7 @@ export class RouterBuilder {
   }
 
   private register(
-    method: 'get' | 'post' | 'put' | 'patch' | 'delete' | 'all' | 'options' | 'head',
+    method: "get" | "post" | "put" | "patch" | "delete" | "all" | "options" | "head",
     path: string,
     ...handlers: HandlerOrAlias[]
   ) {
@@ -417,7 +436,7 @@ export class RouterBuilder {
 
     for (let h of handlers as any[]) {
       // Handle [ControllerClass, 'method'] or ControllerClass (if it has a handle method or similar)
-        if (Array.isArray(h) && h.length === 2 && typeof h[0] === 'function') {
+      if (Array.isArray(h) && h.length === 2 && typeof h[0] === "function") {
         const [ControllerClass, methodName] = h;
         controllerRef = { controller: ControllerClass, method: String(methodName) };
         // Use a wrapper whose declared arity matches the "arity === 3" branch in
@@ -431,8 +450,8 @@ export class RouterBuilder {
             const className = ControllerClass?.name ?? "UnknownController";
 
             throw new Error(
-                `Route resolution failed: "${className}.${String(methodName)}()" does not exist. ` +
-                `Ensure the method is defined and publicly accessible on the controller.`
+              `Route resolution failed: "${className}.${String(methodName)}()" does not exist. ` +
+                `Ensure the method is defined and publicly accessible on the controller.`,
             );
           }
 
@@ -440,19 +459,20 @@ export class RouterBuilder {
           return controllerInstance[methodName](req, res, ...allModels);
         };
       } else if (this.isClassConstructor(h)) {
-         const ControllerClass = h;
-         controllerRef = { controller: ControllerClass, method: 'handle' };
-         // Same strategy as above for class-style controller invocations.
-         h = async (req: any, res: any, _firstBound?: any, ...models: any[]) => {
-           const controllerInstance = container.make<any>(ControllerClass);
-           const method = controllerInstance.handle || controllerInstance.__invoke || controllerInstance;
-           if (typeof method === 'function') {
-             const allModels = [_firstBound, ...models].filter((v) => v !== undefined);
-             return method.call(controllerInstance, req, res, ...allModels);
-           }
-           return method;
-         };
-       }
+        const ControllerClass = h;
+        controllerRef = { controller: ControllerClass, method: "handle" };
+        // Same strategy as above for class-style controller invocations.
+        h = async (req: any, res: any, _firstBound?: any, ...models: any[]) => {
+          const controllerInstance = container.make<any>(ControllerClass);
+          const method =
+            controllerInstance.handle || controllerInstance.__invoke || controllerInstance;
+          if (typeof method === "function") {
+            const allModels = [_firstBound, ...models].filter((v) => v !== undefined);
+            return method.call(controllerInstance, req, res, ...allModels);
+          }
+          return method;
+        };
+      }
 
       const r = resolveMiddleware(h as any);
       if (Array.isArray(r)) resolvedHandlers.push(...(r as any));
@@ -462,7 +482,7 @@ export class RouterBuilder {
     // If no controller ref was captured, store the last handler function ref
     if (!controllerRef) {
       const lastHandler = handlers[handlers.length - 1];
-      if (typeof lastHandler === 'function' && !this.isClassConstructor(lastHandler)) {
+      if (typeof lastHandler === "function" && !this.isClassConstructor(lastHandler)) {
         controllerRef = { controller: lastHandler };
       }
     }
@@ -473,9 +493,7 @@ export class RouterBuilder {
     (this.router as any)[method](fullPath, ...middlewares, ...wrappedHandlers);
 
     // Get middleware names for route listing
-    const middlewareNames = handlers
-      .filter(h => typeof h === 'string')
-      .map(h => String(h));
+    const middlewareNames = handlers.filter((h) => typeof h === "string").map((h) => String(h));
 
     // Store route name if provided
     let routeName: string | null = null;
@@ -488,7 +506,7 @@ export class RouterBuilder {
         path: fullPath,
         method: method.toUpperCase(),
       });
-      this.currentRouteName = '';
+      this.currentRouteName = "";
     }
 
     // Store ALL routes for route:list command
@@ -546,42 +564,42 @@ export class RouterBuilder {
 
   // HTTP methods that return this for chaining
   get(path: string, ...handlers: HandlerOrAlias[]): this {
-    this.register('get', path, ...handlers);
+    this.register("get", path, ...handlers);
     return this;
   }
 
   post(path: string, ...handlers: HandlerOrAlias[]): this {
-    this.register('post', path, ...handlers);
+    this.register("post", path, ...handlers);
     return this;
   }
 
   put(path: string, ...handlers: HandlerOrAlias[]): this {
-    this.register('put', path, ...handlers);
+    this.register("put", path, ...handlers);
     return this;
   }
 
   patch(path: string, ...handlers: HandlerOrAlias[]): this {
-    this.register('patch', path, ...handlers);
+    this.register("patch", path, ...handlers);
     return this;
   }
 
   delete(path: string, ...handlers: HandlerOrAlias[]): this {
-    this.register('delete', path, ...handlers);
+    this.register("delete", path, ...handlers);
     return this;
   }
 
   all(path: string, ...handlers: HandlerOrAlias[]): this {
-    this.register('all', path, ...handlers);
+    this.register("all", path, ...handlers);
     return this;
   }
 
   options(path: string, ...handlers: HandlerOrAlias[]): this {
-    this.register('options', path, ...handlers);
+    this.register("options", path, ...handlers);
     return this;
   }
 
   head(path: string, ...handlers: HandlerOrAlias[]): this {
-    this.register('head', path, ...handlers);
+    this.register("head", path, ...handlers);
     return this;
   }
 
@@ -593,7 +611,7 @@ export class RouterBuilder {
 
   // Parameter constraints
   where(parameter: string | Record<string, string | RegExp>, constraint?: string | RegExp): this {
-    if (typeof parameter === 'object') {
+    if (typeof parameter === "object") {
       Object.assign(this.whereStack[this.whereStack.length - 1], parameter);
     } else if (constraint !== undefined) {
       this.whereStack[this.whereStack.length - 1][parameter] = constraint;
@@ -616,13 +634,13 @@ export class RouterBuilder {
     } = {},
   ) {
     const routes = {
-      index: { method: 'get', path: `/${name}` },
-      create: { method: 'get', path: `/${name}/create` },
-      store: { method: 'post', path: `/${name}` },
-      show: { method: 'get', path: `/${name}/:${name}` },
-      edit: { method: 'get', path: `/${name}/:${name}/edit` },
-      update: { method: 'put', path: `/${name}/:${name}` },
-      destroy: { method: 'delete', path: `/${name}/:${name}` },
+      index: { method: "get", path: `/${name}` },
+      create: { method: "get", path: `/${name}/create` },
+      store: { method: "post", path: `/${name}` },
+      show: { method: "get", path: `/${name}/:${name}` },
+      edit: { method: "get", path: `/${name}/:${name}/edit` },
+      update: { method: "put", path: `/${name}/:${name}` },
+      destroy: { method: "delete", path: `/${name}/:${name}` },
     };
 
     const only = options.only || Object.keys(routes);
@@ -631,7 +649,7 @@ export class RouterBuilder {
 
     // Parameter customization
     let parameters = options.parameters || {};
-    if (typeof parameters === 'string') {
+    if (typeof parameters === "string") {
       parameters = { [name]: parameters };
     }
     const idParam = (parameters as Record<string, string>)[name] || name;
@@ -681,7 +699,7 @@ export class RouterBuilder {
         // Register the route
         this.name(finalRouteName);
 
-        if (routeName === 'update') {
+        if (routeName === "update") {
           // Support both PUT and PATCH for update
           this.put(routePath, ...handlers);
           this.patch(routePath, ...handlers);
@@ -701,7 +719,7 @@ export class RouterBuilder {
   apiResource(name: string, controller: any, options?: any): void {
     this.resource(name, controller, {
       ...options,
-      except: ['create', 'edit'],
+      except: ["create", "edit"],
     });
   }
 
@@ -721,7 +739,7 @@ export class RouterBuilder {
     const missingParams = (path.match(/:\w+/g) || []).map((m) => m.substring(1));
     if (missingParams.length > 0) {
       throw new Error(
-        `Missing required parameters for route [${name}]: ${missingParams.join(', ')}`,
+        `Missing required parameters for route [${name}]: ${missingParams.join(", ")}`,
       );
     }
 
@@ -754,7 +772,7 @@ export class RouterBuilder {
         if (Array.isArray(r)) resolvedHandlers.push(...r);
         else resolvedHandlers.push(r);
       }
-      this.router.all('*', ...resolvedHandlers);
+      this.router.all("*", ...resolvedHandlers);
     }
   }
 
@@ -781,7 +799,10 @@ export class RouterBuilder {
           withoutMiddleware(excluded: RequestHandler | RequestHandler[] | string | string[]) {
             return {
               group(cb2: (rb: RouterBuilder) => void) {
-                self.group({ prefix, middleware: mw as any, withoutMiddleware: excluded as any }, cb2);
+                self.group(
+                  { prefix, middleware: mw as any, withoutMiddleware: excluded as any },
+                  cb2,
+                );
                 return self;
               },
             };
@@ -804,7 +825,10 @@ export class RouterBuilder {
           middleware(included: RequestHandler | RequestHandler[] | string | string[]) {
             return {
               group(cb2: (rb: RouterBuilder) => void) {
-                self.group({ prefix, middleware: included as any, withoutMiddleware: mw as any }, cb2);
+                self.group(
+                  { prefix, middleware: included as any, withoutMiddleware: mw as any },
+                  cb2,
+                );
                 return self;
               },
             };
@@ -892,7 +916,7 @@ export class RouterBuilder {
   match(methods: string[], path: string, ...handlers: HandlerOrAlias[]): this {
     methods.forEach((method) => {
       if (
-        ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'].includes(method.toLowerCase())
+        ["get", "post", "put", "patch", "delete", "options", "head"].includes(method.toLowerCase())
       ) {
         this.register(method.toLowerCase() as any, path, ...handlers);
       }
@@ -902,7 +926,7 @@ export class RouterBuilder {
 
   // Any method
   any(path: string, ...handlers: HandlerOrAlias[]): this {
-    const methods = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
+    const methods = ["get", "post", "put", "patch", "delete", "options", "head"];
     methods.forEach((method) => {
       this.register(method as any, path, ...handlers);
     });

@@ -18,13 +18,9 @@
  *   router.post('/api/login', throttle('login'), controller);
  */
 
-import { Request, Response, NextFunction, RequestHandler } from 'express';
-import {
-  RateLimiter,
-  RateLimitExceededException,
-  getNamedLimiter,
-} from '@/cache/RateLimiter';
-import { registerMiddleware } from './middleware';
+import { Request, Response, NextFunction, RequestHandler } from "express";
+import { RateLimiter, RateLimitExceededException, getNamedLimiter } from "@/cache/RateLimiter";
+import { registerMiddleware } from "./middleware";
 
 const rateLimiter = new RateLimiter();
 
@@ -36,16 +32,16 @@ export type KeyResolver = (req: Request) => string;
 
 const defaultKeyResolver: KeyResolver = (req: Request): string => {
   // Try to get real IP from various headers (for reverse proxies)
-  const forwarded = req.headers['x-forwarded-for'];
+  const forwarded = req.headers["x-forwarded-for"];
   if (forwarded) {
-    const ips = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(',')[0];
+    const ips = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
     return ips.trim();
   }
-  const realIp = req.headers['x-real-ip'];
+  const realIp = req.headers["x-real-ip"];
   if (realIp) {
     return Array.isArray(realIp) ? realIp[0] : realIp;
   }
-  return req.ip || req.socket.remoteAddress || 'unknown';
+  return req.ip || req.socket.remoteAddress || "unknown";
 };
 
 /**
@@ -88,7 +84,7 @@ export interface ThrottleOptions {
  */
 const defaultResponseHandler = (req: Request, res: Response, retryAfter: number): void => {
   res.status(429).json({
-    message: 'Too Many Attempts.',
+    message: "Too Many Attempts.",
     retry_after: retryAfter,
   });
 };
@@ -103,7 +99,7 @@ const defaultResponseHandler = (req: Request, res: Response, retryAfter: number)
 export function throttle(
   maxAttemptsOrName?: number | string,
   decayMinutes?: number,
-  options?: ThrottleOptions
+  options?: ThrottleOptions,
 ): RequestHandler {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -111,7 +107,10 @@ export function throttle(
       let decaySeconds: number;
 
       // Check if using a named limiter
-      if (!Number.isFinite(maxAttemptsOrName? +maxAttemptsOrName: undefined) && typeof maxAttemptsOrName === 'string') {
+      if (
+        !Number.isFinite(maxAttemptsOrName ? +maxAttemptsOrName : undefined) &&
+        typeof maxAttemptsOrName === "string"
+      ) {
         const namedConfig = getNamedLimiter(maxAttemptsOrName);
         if (!namedConfig) {
           console.warn(`Rate limiter [${maxAttemptsOrName}] is not defined. Using defaults.`);
@@ -123,11 +122,12 @@ export function throttle(
         }
       } else {
         maxAttempts = Number(maxAttemptsOrName) ?? options?.maxAttempts ?? 60;
-        decaySeconds = options?.decaySeconds ?? (Number(decayMinutes ?? options?.decayMinutes ?? 1) * 60);
+        decaySeconds =
+          options?.decaySeconds ?? Number(decayMinutes ?? options?.decayMinutes ?? 1) * 60;
       }
       const keyResolver = options?.keyResolver ?? defaultKeyResolver;
       const responseHandler = options?.responseHandler ?? defaultResponseHandler;
-      const prefix = options?.prefix ?? 'throttle';
+      const prefix = options?.prefix ?? "throttle";
 
       const key = `${prefix}:${keyResolver(req)}`;
 
@@ -137,10 +137,10 @@ export function throttle(
         const info = await rateLimiter.getInfo(key, maxAttempts, decaySeconds);
 
         // Set rate limit headers
-        res.setHeader('X-RateLimit-Limit', maxAttempts);
-        res.setHeader('X-RateLimit-Remaining', info.remaining);
-        res.setHeader('X-RateLimit-Reset', info.resetsAt);
-        res.setHeader('Retry-After', retryAfter);
+        res.setHeader("X-RateLimit-Limit", maxAttempts);
+        res.setHeader("X-RateLimit-Remaining", info.remaining);
+        res.setHeader("X-RateLimit-Reset", info.resetsAt);
+        res.setHeader("Retry-After", retryAfter);
 
         responseHandler(req, res, retryAfter);
         return;
@@ -151,14 +151,14 @@ export function throttle(
       const info = await rateLimiter.getInfo(key, maxAttempts, decaySeconds);
 
       // Set rate limit headers
-      res.setHeader('X-RateLimit-Limit', maxAttempts);
-      res.setHeader('X-RateLimit-Remaining', info.remaining);
-      res.setHeader('X-RateLimit-Reset', info.resetsAt);
+      res.setHeader("X-RateLimit-Limit", maxAttempts);
+      res.setHeader("X-RateLimit-Remaining", info.remaining);
+      res.setHeader("X-RateLimit-Reset", info.resetsAt);
 
       next();
     } catch (error) {
       // If rate limiting fails (e.g., cache unavailable), let the request through
-      console.error('Rate limiter error:', error);
+      console.error("Rate limiter error:", error);
       next();
     }
   };
@@ -167,26 +167,20 @@ export function throttle(
 /**
  * Create a throttle middleware for API routes (using path-based keys)
  */
-export function apiThrottle(
-  maxAttempts: number = 60,
-  decayMinutes: number = 1
-): RequestHandler {
+export function apiThrottle(maxAttempts: number = 60, decayMinutes: number = 1): RequestHandler {
   return throttle(maxAttempts, decayMinutes, {
     keyResolver: pathKeyResolver,
-    prefix: 'api_throttle',
+    prefix: "api_throttle",
   });
 }
 
 /**
  * Create a throttle middleware for authenticated users (using user ID)
  */
-export function userThrottle(
-  maxAttempts: number = 60,
-  decayMinutes: number = 1
-): RequestHandler {
+export function userThrottle(maxAttempts: number = 60, decayMinutes: number = 1): RequestHandler {
   return throttle(maxAttempts, decayMinutes, {
     keyResolver: userKeyResolver,
-    prefix: 'user_throttle',
+    prefix: "user_throttle",
   });
 }
 
@@ -196,11 +190,11 @@ export function userThrottle(
  */
 export function sensitiveThrottle(
   maxAttempts: number = 5,
-  decayMinutes: number = 1
+  decayMinutes: number = 1,
 ): RequestHandler {
   return throttle(maxAttempts, decayMinutes, {
     keyResolver: pathKeyResolver,
-    prefix: 'sensitive_throttle',
+    prefix: "sensitive_throttle",
   });
 }
 
@@ -218,4 +212,3 @@ export const keyResolvers = {
 };
 
 export default throttle;
-

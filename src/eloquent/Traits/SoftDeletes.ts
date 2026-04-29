@@ -1,9 +1,8 @@
+import { trait } from "./traits";
+import { Model } from "@/eloquent/Model";
+import { SoftDeletes as SfDeletes } from "./built-ins";
 
-import { trait } from './traits';
-import { Model } from '@/eloquent/Model';
-import { SoftDeletes as SfDeletes } from './built-ins'
-
-@trait('SoftDeletes')
+@trait("SoftDeletes")
 export class SoftDeletes extends SfDeletes {
   /**
    * Determine if the model has been soft-deleted
@@ -41,4 +40,3 @@ export class SoftDeletes extends SfDeletes {
     (modelClass as any).softDeletes = true;
   }
 }
-

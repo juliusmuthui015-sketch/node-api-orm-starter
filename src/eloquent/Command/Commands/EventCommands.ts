@@ -1,10 +1,10 @@
-import { Command } from '@/eloquent/Command/Command';
-import { ArgumentsCamelCase } from 'yargs';
+import { Command } from "@/eloquent/Command/Command";
+import { ArgumentsCamelCase } from "yargs";
 import {
-    getEventDispatcher,
-    getRegisteredListeners,
-    getRegisteredSubscribers,
-} from '@/eloquent/Core/Events';
+  getEventDispatcher,
+  getRegisteredListeners,
+  getRegisteredSubscribers,
+} from "@/eloquent/Core/Events";
 
 /*
 |--------------------------------------------------------------------------
@@ -16,86 +16,99 @@ import {
 */
 
 export class EventListCommand extends Command {
-    protected signature = 'event:list';
-    protected description = 'List all registered events and listeners';
+  protected signature = "event:list";
+  protected description = "List all registered events and listeners";
 
-    protected options = {
-        event: { type: 'string' as const, description: 'Filter by event name', alias: 'e' },
-        json: { type: 'boolean' as const, description: 'Output as JSON', default: false },
-    };
+  protected options = {
+    event: { type: "string" as const, description: "Filter by event name", alias: "e" },
+    json: { type: "boolean" as const, description: "Output as JSON", default: false },
+  };
 
-    async handle(args: ArgumentsCamelCase): Promise<void> {
-        // Import listeners/subscribers to trigger decorator registration
-        try {
-            await require('@/app/Listeners');
-        } catch (e) { /* ignore */ }
-        try {
-            await require('@/app/Subscribers');
-        } catch (e) { /* ignore */ }
-
-        const dispatcher = getEventDispatcher();
-        const registeredListeners = getRegisteredListeners();
-        const registeredSubscribers = getRegisteredSubscribers();
-
-        // Build event-listener map
-        const eventMap: Record<string, Array<{ listener: string; queued: boolean; queue?: string }>> = {};
-
-        // From decorator registry
-        for (const [ListenerClass, metadata] of registeredListeners) {
-            for (const eventName of metadata.events) {
-                if (args.event && !eventName.includes(args.event as string)) continue;
-
-                if (!eventMap[eventName]) {
-                    eventMap[eventName] = [];
-                }
-                eventMap[eventName].push({
-                    listener: ListenerClass.name,
-                    queued: metadata.shouldQueue,
-                    queue: metadata.queueConfig?.queue,
-                });
-            }
-        }
-
-        if (args.json) {
-            this.line(JSON.stringify({
-                events: eventMap,
-                subscriberCount: registeredSubscribers.size,
-                subscribers: Array.from(registeredSubscribers).map(s => s.name),
-            }, null, 2));
-            return;
-        }
-
-        const eventNames = Object.keys(eventMap).sort();
-
-        if (eventNames.length === 0) {
-            this.warn('No events registered.');
-            this.newLine();
-            this.comment('Tip: Use @ListensTo decorator on listener classes for auto-discovery.');
-            return;
-        }
-
-        this.info(`Registered Events (${eventNames.length}):\n`);
-
-        for (const eventName of eventNames) {
-            this.line(`  \x1b[36m${eventName}\x1b[0m`);
-            for (const listener of eventMap[eventName]) {
-                const queueInfo = listener.queued
-                    ? ` \x1b[33m[queued${listener.queue ? `:${listener.queue}` : ''}]\x1b[0m`
-                    : '';
-                this.line(`    → ${listener.listener}${queueInfo}`);
-            }
-            this.newLine();
-        }
-
-        // Show subscribers
-        if (registeredSubscribers.size > 0) {
-            this.info(`Registered Subscribers (${registeredSubscribers.size}):\n`);
-            for (const Subscriber of registeredSubscribers) {
-                this.line(`  → ${Subscriber.name}`);
-            }
-            this.newLine();
-        }
+  async handle(args: ArgumentsCamelCase): Promise<void> {
+    // Import listeners/subscribers to trigger decorator registration
+    try {
+      await require("@/app/Listeners");
+    } catch (e) {
+      /* ignore */
     }
+    try {
+      await require("@/app/Subscribers");
+    } catch (e) {
+      /* ignore */
+    }
+
+    const dispatcher = getEventDispatcher();
+    const registeredListeners = getRegisteredListeners();
+    const registeredSubscribers = getRegisteredSubscribers();
+
+    // Build event-listener map
+    const eventMap: Record<
+      string,
+      Array<{ listener: string; queued: boolean; queue?: string }>
+    > = {};
+
+    // From decorator registry
+    for (const [ListenerClass, metadata] of registeredListeners) {
+      for (const eventName of metadata.events) {
+        if (args.event && !eventName.includes(args.event as string)) continue;
+
+        if (!eventMap[eventName]) {
+          eventMap[eventName] = [];
+        }
+        eventMap[eventName].push({
+          listener: ListenerClass.name,
+          queued: metadata.shouldQueue,
+          queue: metadata.queueConfig?.queue,
+        });
+      }
+    }
+
+    if (args.json) {
+      this.line(
+        JSON.stringify(
+          {
+            events: eventMap,
+            subscriberCount: registeredSubscribers.size,
+            subscribers: Array.from(registeredSubscribers).map((s) => s.name),
+          },
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
+    const eventNames = Object.keys(eventMap).sort();
+
+    if (eventNames.length === 0) {
+      this.warn("No events registered.");
+      this.newLine();
+      this.comment("Tip: Use @ListensTo decorator on listener classes for auto-discovery.");
+      return;
+    }
+
+    this.info(`Registered Events (${eventNames.length}):\n`);
+
+    for (const eventName of eventNames) {
+      this.line(`  \x1b[36m${eventName}\x1b[0m`);
+      for (const listener of eventMap[eventName]) {
+        const queueInfo = listener.queued
+          ? ` \x1b[33m[queued${listener.queue ? `:${listener.queue}` : ""}]\x1b[0m`
+          : "";
+        this.line(`    → ${listener.listener}${queueInfo}`);
+      }
+      this.newLine();
+    }
+
+    // Show subscribers
+    if (registeredSubscribers.size > 0) {
+      this.info(`Registered Subscribers (${registeredSubscribers.size}):\n`);
+      for (const Subscriber of registeredSubscribers) {
+        this.line(`  → ${Subscriber.name}`);
+      }
+      this.newLine();
+    }
+  }
 }
 
 /*
@@ -108,48 +121,48 @@ export class EventListCommand extends Command {
 */
 
 export class EventDispatchCommand extends Command {
-    protected signature = 'event:dispatch <event>';
-    protected description = 'Dispatch an event manually';
+  protected signature = "event:dispatch <event>";
+  protected description = "Dispatch an event manually";
 
-    protected arguments = {
-        event: { type: 'string' as const, description: 'Event name to dispatch', required: true },
-    };
+  protected arguments = {
+    event: { type: "string" as const, description: "Event name to dispatch", required: true },
+  };
 
-    protected options = {
-        payload: { type: 'string' as const, description: 'JSON payload for the event', alias: 'p' },
-        sync: { type: 'boolean' as const, description: 'Dispatch synchronously', default: false },
-    };
+  protected options = {
+    payload: { type: "string" as const, description: "JSON payload for the event", alias: "p" },
+    sync: { type: "boolean" as const, description: "Dispatch synchronously", default: false },
+  };
 
-    async handle(args: ArgumentsCamelCase): Promise<void> {
-        const { event: eventFn, getEventDispatcher } = await require('@/eloquent/Core/Events');
+  async handle(args: ArgumentsCamelCase): Promise<void> {
+    const { event: eventFn, getEventDispatcher } = await require("@/eloquent/Core/Events");
 
-        const eventName = args.event as string;
-        let payload: any = {};
+    const eventName = args.event as string;
+    let payload: any = {};
 
-        if (args.payload) {
-            try {
-                payload = JSON.parse(args.payload as string);
-            } catch (e) {
-                this.error('Invalid JSON payload.');
-                return;
-            }
-        }
-
-        this.info(`Dispatching event: ${eventName}`);
-        this.comment(`Payload: ${JSON.stringify(payload)}`);
-        this.newLine();
-
-        try {
-            if (args.sync) {
-                getEventDispatcher().dispatchSync(eventName, payload);
-            } else {
-                await eventFn(eventName, payload);
-            }
-            this.success(`Event "${eventName}" dispatched successfully.`);
-        } catch (error: any) {
-            this.error(`Failed to dispatch event: ${error.message}`);
-        }
+    if (args.payload) {
+      try {
+        payload = JSON.parse(args.payload as string);
+      } catch (e) {
+        this.error("Invalid JSON payload.");
+        return;
+      }
     }
+
+    this.info(`Dispatching event: ${eventName}`);
+    this.comment(`Payload: ${JSON.stringify(payload)}`);
+    this.newLine();
+
+    try {
+      if (args.sync) {
+        getEventDispatcher().dispatchSync(eventName, payload);
+      } else {
+        await eventFn(eventName, payload);
+      }
+      this.success(`Event "${eventName}" dispatched successfully.`);
+    } catch (error: any) {
+      this.error(`Failed to dispatch event: ${error.message}`);
+    }
+  }
 }
 
 /*
@@ -162,31 +175,35 @@ export class EventDispatchCommand extends Command {
 */
 
 export class EventClearCommand extends Command {
-    protected signature = 'event:clear';
-    protected description = 'Clear all registered event listeners';
+  protected signature = "event:clear";
+  protected description = "Clear all registered event listeners";
 
-    protected options = {
-        event: { type: 'string' as const, description: 'Clear listeners for a specific event', alias: 'e' },
-    };
+  protected options = {
+    event: {
+      type: "string" as const,
+      description: "Clear listeners for a specific event",
+      alias: "e",
+    },
+  };
 
-    async handle(args: ArgumentsCamelCase): Promise<void> {
-        const { getEventDispatcher, clearEventRegistries } = await require('@/eloquent/Core/Events');
-        const dispatcher = getEventDispatcher();
+  async handle(args: ArgumentsCamelCase): Promise<void> {
+    const { getEventDispatcher, clearEventRegistries } = await require("@/eloquent/Core/Events");
+    const dispatcher = getEventDispatcher();
 
-        if (args.event) {
-            dispatcher.forget(args.event as string);
-            this.success(`Listeners for "${args.event}" cleared.`);
-        } else {
-            const confirmed = await this.confirm('Are you sure you want to clear ALL event listeners?');
-            if (!confirmed) {
-                this.warn('Operation cancelled.');
-                return;
-            }
-            dispatcher.flush();
-            clearEventRegistries();
-            this.success('All event listeners cleared.');
-        }
+    if (args.event) {
+      dispatcher.forget(args.event as string);
+      this.success(`Listeners for "${args.event}" cleared.`);
+    } else {
+      const confirmed = await this.confirm("Are you sure you want to clear ALL event listeners?");
+      if (!confirmed) {
+        this.warn("Operation cancelled.");
+        return;
+      }
+      dispatcher.flush();
+      clearEventRegistries();
+      this.success("All event listeners cleared.");
     }
+  }
 }
 
 /*
@@ -199,35 +216,40 @@ export class EventClearCommand extends Command {
 */
 
 export class EventGenerateCommand extends Command {
-    protected signature = 'make:event <name>';
-    protected description = 'Create a new event class';
+  protected signature = "make:event <name>";
+  protected description = "Create a new event class";
 
-    protected arguments = {
-        name: { type: 'string' as const, description: 'Event class name', required: true },
-    };
+  protected arguments = {
+    name: { type: "string" as const, description: "Event class name", required: true },
+  };
 
-    protected options = {
-        queued: { type: 'boolean' as const, description: 'Make the event queueable', default: false, alias: 'q' },
-    };
+  protected options = {
+    queued: {
+      type: "boolean" as const,
+      description: "Make the event queueable",
+      default: false,
+      alias: "q",
+    },
+  };
 
-    async handle(args: ArgumentsCamelCase): Promise<void> {
-        const fs = await require('fs/promises');
-        const path = await require('path');
+  async handle(args: ArgumentsCamelCase): Promise<void> {
+    const fs = await require("fs/promises");
+    const path = await require("path");
 
-        const eventName = args.name as string;
-        const isQueued = args.queued as boolean;
+    const eventName = args.name as string;
+    const isQueued = args.queued as boolean;
 
-        // Convert to proper class name (PascalCase)
-        const className = eventName.replace(/[^a-zA-Z0-9]/g, '');
+    // Convert to proper class name (PascalCase)
+    const className = eventName.replace(/[^a-zA-Z0-9]/g, "");
 
-        // Convert to event name (dot notation)
-        const eventDotName = eventName
-            .replace(/([A-Z])/g, '.$1')
-            .toLowerCase()
-            .replace(/^\./, '')
-            .replace(/\s+/g, '.');
+    // Convert to event name (dot notation)
+    const eventDotName = eventName
+      .replace(/([A-Z])/g, ".$1")
+      .toLowerCase()
+      .replace(/^\./, "")
+      .replace(/\s+/g, ".");
 
-        const template = `import { Event } from '@/eloquent/Core/Events';
+    const template = `import { Event } from '@/eloquent/Core/Events';
 
 /*
 |--------------------------------------------------------------------------
@@ -239,13 +261,17 @@ export class EventGenerateCommand extends Command {
 */
 
 export class ${className} extends Event {
-${isQueued ? `    /**
+${
+  isQueued
+    ? `    /**
      * Indicates if this event should be queued.
      */
     public shouldQueue = true;
     public queue = 'default';
 
-` : ''}    constructor(
+`
+    : ""
+}    constructor(
         // Add your event properties here
         public id: string | number,
         public data?: Record<string, any>
@@ -269,24 +295,24 @@ ${isQueued ? `    /**
 }
 `;
 
-        const eventsDir = path.join(process.cwd(), 'src/app/Events');
-        const filePath = path.join(eventsDir, `${className}.ts`);
+    const eventsDir = path.join(process.cwd(), "src/app/Events");
+    const filePath = path.join(eventsDir, `${className}.ts`);
 
-        // Check if file exists
-        try {
-            await fs.access(filePath);
-            this.error(`Event ${className} already exists at ${filePath}`);
-            return;
-        } catch {
-            // File doesn't exist, good to create
-        }
-
-        await fs.writeFile(filePath, template);
-        this.success(`Event created: src/app/Events/${className}.ts`);
-        this.newLine();
-        this.comment('Don\'t forget to export it from src/app/Events/index.ts:');
-        this.line(`  export { ${className} } from './${className}';`);
+    // Check if file exists
+    try {
+      await fs.access(filePath);
+      this.error(`Event ${className} already exists at ${filePath}`);
+      return;
+    } catch {
+      // File doesn't exist, good to create
     }
+
+    await fs.writeFile(filePath, template);
+    this.success(`Event created: src/app/Events/${className}.ts`);
+    this.newLine();
+    this.comment("Don't forget to export it from src/app/Events/index.ts:");
+    this.line(`  export { ${className} } from './${className}';`);
+  }
 }
 
 /*
@@ -299,39 +325,42 @@ ${isQueued ? `    /**
 */
 
 export class ListenerGenerateCommand extends Command {
-    protected signature = 'make:listener <name>';
-    protected description = 'Create a new event listener class';
+  protected signature = "make:listener <name>";
+  protected description = "Create a new event listener class";
 
-    protected arguments = {
-        name: { type: 'string' as const, description: 'Listener class name', required: true },
-    };
+  protected arguments = {
+    name: { type: "string" as const, description: "Listener class name", required: true },
+  };
 
-    protected options = {
-        event: { type: 'string' as const, description: 'Event to listen for', alias: 'e' },
-        queued: { type: 'boolean' as const, description: 'Make the listener queueable', default: false, alias: 'q' },
-        queue: { type: 'string' as const, description: 'Queue name for queued listener' },
-    };
+  protected options = {
+    event: { type: "string" as const, description: "Event to listen for", alias: "e" },
+    queued: {
+      type: "boolean" as const,
+      description: "Make the listener queueable",
+      default: false,
+      alias: "q",
+    },
+    queue: { type: "string" as const, description: "Queue name for queued listener" },
+  };
 
-    async handle(args: ArgumentsCamelCase): Promise<void> {
-        const fs = await require('fs/promises');
-        const path = await require('path');
+  async handle(args: ArgumentsCamelCase): Promise<void> {
+    const fs = await require("fs/promises");
+    const path = await require("path");
 
-        const listenerName = args.name as string;
-        const eventName = args.event as string || 'event.name';
-        const isQueued = args.queued as boolean;
-        const queueName = args.queue as string || 'default';
+    const listenerName = args.name as string;
+    const eventName = (args.event as string) || "event.name";
+    const isQueued = args.queued as boolean;
+    const queueName = (args.queue as string) || "default";
 
-        const className = listenerName.replace(/[^a-zA-Z0-9]/g, '');
+    const className = listenerName.replace(/[^a-zA-Z0-9]/g, "");
 
-        const queueDecorator = isQueued
-            ? `@ShouldQueueDecorator({ queue: '${queueName}' })\n`
-            : '';
+    const queueDecorator = isQueued ? `@ShouldQueueDecorator({ queue: '${queueName}' })\n` : "";
 
-        const imports = isQueued
-            ? `import { Listener, ListensTo, ShouldQueueDecorator } from '@/eloquent/Core/Events';`
-            : `import { Listener, ListensTo } from '@/eloquent/Core/Events';`;
+    const imports = isQueued
+      ? `import { Listener, ListensTo, ShouldQueueDecorator } from '@/eloquent/Core/Events';`
+      : `import { Listener, ListensTo } from '@/eloquent/Core/Events';`;
 
-        const template = `${imports}
+    const template = `${imports}
 
 /*
 |--------------------------------------------------------------------------
@@ -375,23 +404,23 @@ ${queueDecorator}export class ${className} extends Listener<${className}Payload>
 }
 `;
 
-        const listenersDir = path.join(process.cwd(), 'src/app/Listeners');
-        const filePath = path.join(listenersDir, `${className}.ts`);
+    const listenersDir = path.join(process.cwd(), "src/app/Listeners");
+    const filePath = path.join(listenersDir, `${className}.ts`);
 
-        try {
-            await fs.access(filePath);
-            this.error(`Listener ${className} already exists at ${filePath}`);
-            return;
-        } catch {
-            // File doesn't exist, good to create
-        }
-
-        await fs.writeFile(filePath, template);
-        this.success(`Listener created: src/app/Listeners/${className}.ts`);
-        this.newLine();
-        this.comment('Don\'t forget to export it from src/app/Listeners/index.ts:');
-        this.line(`  export { ${className} } from './${className}';`);
+    try {
+      await fs.access(filePath);
+      this.error(`Listener ${className} already exists at ${filePath}`);
+      return;
+    } catch {
+      // File doesn't exist, good to create
     }
+
+    await fs.writeFile(filePath, template);
+    this.success(`Listener created: src/app/Listeners/${className}.ts`);
+    this.newLine();
+    this.comment("Don't forget to export it from src/app/Listeners/index.ts:");
+    this.line(`  export { ${className} } from './${className}';`);
+  }
 }
 
 /*
@@ -404,27 +433,27 @@ ${queueDecorator}export class ${className} extends Listener<${className}Payload>
 */
 
 export class SubscriberGenerateCommand extends Command {
-    protected signature = 'make:subscriber <name>';
-    protected description = 'Create a new event subscriber class';
+  protected signature = "make:subscriber <name>";
+  protected description = "Create a new event subscriber class";
 
-    protected arguments = {
-        name: { type: 'string' as const, description: 'Subscriber class name', required: true },
-    };
+  protected arguments = {
+    name: { type: "string" as const, description: "Subscriber class name", required: true },
+  };
 
-    async handle(args: ArgumentsCamelCase): Promise<void> {
-        const fs = await require('fs/promises');
-        const path = await require('path');
+  async handle(args: ArgumentsCamelCase): Promise<void> {
+    const fs = await require("fs/promises");
+    const path = await require("path");
 
-        const subscriberName = args.name as string;
-        const className = subscriberName.replace(/[^a-zA-Z0-9]/g, '');
+    const subscriberName = args.name as string;
+    const className = subscriberName.replace(/[^a-zA-Z0-9]/g, "");
 
-        // Infer domain from name (e.g., UserEventSubscriber -> user)
-        const domain = className
-            .replace(/EventSubscriber$/, '')
-            .replace(/Subscriber$/, '')
-            .toLowerCase();
+    // Infer domain from name (e.g., UserEventSubscriber -> user)
+    const domain = className
+      .replace(/EventSubscriber$/, "")
+      .replace(/Subscriber$/, "")
+      .toLowerCase();
 
-        const template = `import { EventDispatcher, EventSubscriber, Subscriber } from '@/eloquent/Core/Events';
+    const template = `import { EventDispatcher, EventSubscriber, Subscriber } from '@/eloquent/Core/Events';
 
 /*
 |--------------------------------------------------------------------------
@@ -480,30 +509,29 @@ export class ${className} implements EventSubscriber {
 }
 `;
 
-        const subscribersDir = path.join(process.cwd(), 'src/app/Subscribers');
+    const subscribersDir = path.join(process.cwd(), "src/app/Subscribers");
 
-        // Ensure directory exists
-        try {
-            await fs.mkdir(subscribersDir, { recursive: true });
-        } catch {
-            // Directory exists
-        }
-
-        const filePath = path.join(subscribersDir, `${className}.ts`);
-
-        try {
-            await fs.access(filePath);
-            this.error(`Subscriber ${className} already exists at ${filePath}`);
-            return;
-        } catch {
-            // File doesn't exist, good to create
-        }
-
-        await fs.writeFile(filePath, template);
-        this.success(`Subscriber created: src/app/Subscribers/${className}.ts`);
-        this.newLine();
-        this.comment('Don\'t forget to export it from src/app/Subscribers/index.ts:');
-        this.line(`  export { ${className} } from './${className}';`);
+    // Ensure directory exists
+    try {
+      await fs.mkdir(subscribersDir, { recursive: true });
+    } catch {
+      // Directory exists
     }
-}
 
+    const filePath = path.join(subscribersDir, `${className}.ts`);
+
+    try {
+      await fs.access(filePath);
+      this.error(`Subscriber ${className} already exists at ${filePath}`);
+      return;
+    } catch {
+      // File doesn't exist, good to create
+    }
+
+    await fs.writeFile(filePath, template);
+    this.success(`Subscriber created: src/app/Subscribers/${className}.ts`);
+    this.newLine();
+    this.comment("Don't forget to export it from src/app/Subscribers/index.ts:");
+    this.line(`  export { ${className} } from './${className}';`);
+  }
+}

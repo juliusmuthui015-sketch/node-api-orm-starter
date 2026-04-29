@@ -1,26 +1,26 @@
 // Model.ts
-import { ModelAttributes, RelationshipConfig, Casts } from './types';
-import { EloquentBuilder } from './EloquentBuilder';
-import { HasOne, HasMany, BelongsTo, BelongsToMany } from './relationships';
-import { getDbType, collection as mongoCollection } from '@/config/db.config';
-import DB from './DB';
-import util from 'util';
-import { ObjectId } from 'mongodb';
+import { ModelAttributes, RelationshipConfig, Casts } from "./types";
+import { EloquentBuilder } from "./EloquentBuilder";
+import { HasOne, HasMany, BelongsTo, BelongsToMany } from "./relationships";
+import { getDbType, collection as mongoCollection } from "@/config/db.config";
+import DB from "./DB";
+import util from "util";
+import { ObjectId } from "mongodb";
 import {
   AccessorDescriptor,
   ModelEvents,
   MutatorDescriptor,
   ToJSONOptions,
-} from '@/eloquent/model_interfaces';
-import { applyTraits, ClassBasedTrait, ScopeMethod } from '@/eloquent/Traits/traits';
-import type { AttachTraits } from '@/eloquent/Traits/helper';
-import {Observer} from "@/eloquent/Observers/Observer";
+} from "@/eloquent/model_interfaces";
+import { applyTraits, ClassBasedTrait, ScopeMethod } from "@/eloquent/Traits/traits";
+import type { AttachTraits } from "@/eloquent/Traits/helper";
+import { Observer } from "@/eloquent/Observers/Observer";
 
 type ObserverConstructor<T extends object> = new () => Observer<T>;
 // Type guard for class-based traits
 function isClassBasedTrait(traitRef: any): traitRef is ClassBasedTrait {
   return (
-    typeof traitRef === 'function' &&
+    typeof traitRef === "function" &&
     traitRef.prototype &&
     traitRef.prototype.constructor === traitRef
   );
@@ -37,7 +37,7 @@ export function use(...traitClasses: any[]): any {
     // Ensure each subclass has its OWN traits array (not the inherited base one).
     // Using hasOwnProperty prevents accidentally mutating the shared Model.traits
     // array which would cause all subclasses to inherit every other model's traits.
-    if (!Object.prototype.hasOwnProperty.call(modelClass, 'traits')) {
+    if (!Object.prototype.hasOwnProperty.call(modelClass, "traits")) {
       modelClass.traits = [];
     }
 
@@ -50,7 +50,7 @@ export function use(...traitClasses: any[]): any {
       }
 
       // Store the class reference for later application
-      if (!Object.prototype.hasOwnProperty.call(modelClass, '__traitClasses')) {
+      if (!Object.prototype.hasOwnProperty.call(modelClass, "__traitClasses")) {
         (modelClass as any).__traitClasses = [];
       }
       (modelClass as any).__traitClasses.push(traitClass as any);
@@ -76,7 +76,7 @@ function autoDetectTraits(modelClass: typeof Model): void {
   // Also check instance properties that might be traits
   const instanceProperties = Object.getOwnPropertyNames(modelClass.prototype);
   instanceProperties.forEach((prop) => {
-    if (prop === 'constructor') return;
+    if (prop === "constructor") return;
     const descriptor = Object.getOwnPropertyDescriptor(modelClass.prototype, prop);
     if (descriptor && descriptor.value && isClassBasedTrait(descriptor.value)) {
       const traitClass = descriptor.value;
@@ -93,8 +93,8 @@ function autoDetectTraits(modelClass: typeof Model): void {
 export abstract class Model {
   [key: string]: any;
 
-  static table: string = '';
-  static primaryKey: string = 'id';
+  static table: string = "";
+  static primaryKey: string = "id";
   static fillable: string[] = [];
   static guarded: string[] = [];
   static hidden: string[] = [];
@@ -162,9 +162,9 @@ export abstract class Model {
 
     return new Proxy(this, {
       get: (target: any, prop: PropertyKey, receiver: any) => {
-        if (typeof prop === 'string') {
+        if (typeof prop === "string") {
           // Always return the real constructor so static property access works
-          if (prop === 'constructor') {
+          if (prop === "constructor") {
             return target.constructor;
           }
 
@@ -178,7 +178,13 @@ export abstract class Model {
             return accessorValue;
           }
 
-          if (prop in target && typeof target[prop] === 'function') {
+          // Loaded relationships take priority over same-named instance methods so that
+          // user.profile returns the eager-loaded UserProfile, not the profile() method.
+          if (prop in target.relationshipsLoaded) {
+            return target.relationshipsLoaded[prop];
+          }
+
+          if (prop in target && typeof target[prop] === "function") {
             // Internal Model methods: bind to target so `this.constructor` stays intact.
             // Subclass-overridden / user-defined methods: bind to receiver (proxy)
             // so attribute access like `this.type_of_cover` works through the proxy.
@@ -188,25 +194,22 @@ export abstract class Model {
           if (prop in target.attributes) {
             return target.attributes[prop];
           }
-          if (prop in target.relationshipsLoaded) {
-            return target.relationshipsLoaded[prop];
-          }
           if (prop in target) {
             const val = target[prop];
-            return typeof val === 'function' ? val.bind(target) : val;
+            return typeof val === "function" ? val.bind(target) : val;
           }
           return undefined;
         }
         return (target as any)[prop];
       },
       set: (target: any, prop: PropertyKey, value: any, receiver: any) => {
-        if (typeof prop === 'string') {
+        if (typeof prop === "string") {
           const internalProps = new Set([
-            'attributes',
-            'original',
-            'relationshipsLoaded',
-            '__isGettingAttribute',
-            '__attributeCache',
+            "attributes",
+            "original",
+            "relationshipsLoaded",
+            "__isGettingAttribute",
+            "__attributeCache",
           ]);
           if (internalProps.has(prop)) {
             (target as any)[prop] = value;
@@ -238,11 +241,14 @@ export abstract class Model {
 
     // Initialize static properties with OWN copies so subclasses never share
     // the base Model arrays/maps (which would cause cross-model trait leakage).
-    if (!Object.prototype.hasOwnProperty.call(staticClass, 'traits')) staticClass.traits = [];
-    if (!Object.prototype.hasOwnProperty.call(staticClass, 'localScopes')) staticClass.localScopes = {};
-    if (!Object.prototype.hasOwnProperty.call(staticClass, 'globalScopes')) staticClass.globalScopes = {};
-    if (!Object.prototype.hasOwnProperty.call(staticClass, 'withoutGlobalScopes')) staticClass.withoutGlobalScopes = [];
-    if (!Object.prototype.hasOwnProperty.call(staticClass, 'eventListeners')) {
+    if (!Object.prototype.hasOwnProperty.call(staticClass, "traits")) staticClass.traits = [];
+    if (!Object.prototype.hasOwnProperty.call(staticClass, "localScopes"))
+      staticClass.localScopes = {};
+    if (!Object.prototype.hasOwnProperty.call(staticClass, "globalScopes"))
+      staticClass.globalScopes = {};
+    if (!Object.prototype.hasOwnProperty.call(staticClass, "withoutGlobalScopes"))
+      staticClass.withoutGlobalScopes = [];
+    if (!Object.prototype.hasOwnProperty.call(staticClass, "eventListeners")) {
       staticClass.eventListeners = {
         creating: [],
         created: [],
@@ -422,7 +428,10 @@ export abstract class Model {
     // registered for one model from being called when another model fires an event.
     // If the class doesn't yet have its own eventListeners or it's still the
     // same object as the base Model, create a fresh map for this class.
-    if (!(this as any).eventListeners || (this as any).eventListeners === (Model as any).eventListeners) {
+    if (
+      !(this as any).eventListeners ||
+      (this as any).eventListeners === (Model as any).eventListeners
+    ) {
       (this as any).eventListeners = {
         creating: [],
         created: [],
@@ -452,37 +461,33 @@ export abstract class Model {
     return this;
   }
 
-    static observe<T extends Model>(
-        observer: ObserverConstructor<T>
-    ) {
-        const instance = new observer();
+  static observe<T extends Model>(observer: ObserverConstructor<T>) {
+    const instance = new observer();
 
-        const events: (keyof ModelEvents)[] = [
-            'creating',
-            'created',
-            'updating',
-            'updated',
-            'saving',
-            'saved',
-            'deleting',
-            'deleted',
-            'restoring',
-            'restored',
-            'retrieved',
-        ];
+    const events: (keyof ModelEvents)[] = [
+      "creating",
+      "created",
+      "updating",
+      "updated",
+      "saving",
+      "saved",
+      "deleting",
+      "deleted",
+      "restoring",
+      "restored",
+      "retrieved",
+    ];
 
-        for (const event of events) {
-            const handler = (instance as any)[event];
+    for (const event of events) {
+      const handler = (instance as any)[event];
 
-            if (typeof handler === 'function') {
-                (this as any).on(event, (model: T) =>
-                    handler.call(instance, model)
-                );
-            }
-        }
-
-        return this;
+      if (typeof handler === "function") {
+        (this as any).on(event, (model: T) => handler.call(instance, model));
+      }
     }
+
+    return this;
+  }
 
   /**
    * Dispatch an event
@@ -537,7 +542,6 @@ export abstract class Model {
    * This runs automatically on first static call (e.g., query/ scope).
    */
   static ensureBooted(): void {
-
     this.boot();
     const self = this as typeof Model & {
       __traitsApplied?: boolean;
@@ -546,11 +550,12 @@ export abstract class Model {
 
     // Initialize static containers with OWN copies (hasOwnProperty) to prevent
     // subclasses from sharing the base Model arrays/maps.
-    if (!Object.prototype.hasOwnProperty.call(self, 'traits')) self.traits = [];
-    if (!Object.prototype.hasOwnProperty.call(self, 'localScopes')) self.localScopes = {} as any;
-    if (!Object.prototype.hasOwnProperty.call(self, 'globalScopes')) self.globalScopes = {} as any;
-    if (!Object.prototype.hasOwnProperty.call(self, 'withoutGlobalScopes')) self.withoutGlobalScopes = [] as any;
-    if (!Object.prototype.hasOwnProperty.call(self, 'eventListeners')) {
+    if (!Object.prototype.hasOwnProperty.call(self, "traits")) self.traits = [];
+    if (!Object.prototype.hasOwnProperty.call(self, "localScopes")) self.localScopes = {} as any;
+    if (!Object.prototype.hasOwnProperty.call(self, "globalScopes")) self.globalScopes = {} as any;
+    if (!Object.prototype.hasOwnProperty.call(self, "withoutGlobalScopes"))
+      self.withoutGlobalScopes = [] as any;
+    if (!Object.prototype.hasOwnProperty.call(self, "eventListeners")) {
       self.eventListeners = {
         creating: [],
         created: [],
@@ -609,7 +614,7 @@ export abstract class Model {
 
     // Get trait methods that start with 'boot'
     const traitMethods = Object.getOwnPropertyNames(staticClass.prototype).filter(
-      (method) => method.startsWith('boot') && method !== 'bootTraits',
+      (method) => method.startsWith("boot") && method !== "bootTraits",
     );
 
     traitMethods.forEach((method) => {
@@ -642,7 +647,7 @@ export abstract class Model {
     const methods = Object.getOwnPropertyNames(traitClass.prototype);
 
     methods.forEach((method) => {
-      if (method !== 'constructor') {
+      if (method !== "constructor") {
         this.prototype[method] = traitClass.prototype[method];
       }
     });
@@ -650,7 +655,7 @@ export abstract class Model {
     // Also mix static methods
     const staticMethods = Object.getOwnPropertyNames(traitClass);
     staticMethods.forEach((method) => {
-      if (method !== 'length' && method !== 'name' && method !== 'prototype') {
+      if (method !== "length" && method !== "name" && method !== "prototype") {
         (this as any)[method] = traitClass[method];
       }
     });
@@ -659,14 +664,14 @@ export abstract class Model {
   // Helper to convert snake_case to StudlyCase method segment
   private static toStudlyCase(key: string): string {
     return key
-      .split('_')
+      .split("_")
       .filter(Boolean)
       .map((seg) => seg.charAt(0).toUpperCase() + seg.slice(1))
-      .join('');
+      .join("");
   }
 
   // Build accessor/mutator method name for a given key
-  private static buildMethodName(prefix: 'get' | 'set', key: string, suffix: 'Attribute'): string {
+  private static buildMethodName(prefix: "get" | "set", key: string, suffix: "Attribute"): string {
     const studly = this.toStudlyCase(key);
     return `${prefix}${studly}${suffix}`;
   }
@@ -695,7 +700,7 @@ export abstract class Model {
    */
   getProperty(prop: string): any {
     // First check if it's a direct property
-    if (prop in this && !['attributes', 'original', 'relationshipsLoaded'].includes(prop)) {
+    if (prop in this && !["attributes", "original", "relationshipsLoaded"].includes(prop)) {
       return this[prop];
     }
 
@@ -737,7 +742,7 @@ export abstract class Model {
 
     // Check for accessor
     const staticClass = this.constructor as typeof Model;
-    const accessorKey = (staticClass as any).buildMethodName('get', key, 'Attribute');
+    const accessorKey = (staticClass as any).buildMethodName("get", key, "Attribute");
     const accessorDescriptor = staticClass._accessors.get(key);
 
     let value: any = undefined;
@@ -758,7 +763,7 @@ export abstract class Model {
       }
     }
     // Fallback to instance method
-    else if (typeof (this as any)[accessorKey] === 'function') {
+    else if (typeof (this as any)[accessorKey] === "function") {
       const result = (this as any)[accessorKey](value);
       if (result instanceof Promise) {
         value = await result;
@@ -804,7 +809,7 @@ export abstract class Model {
     try {
       // Check for accessor
       const staticClass = this.constructor as typeof Model;
-      const accessorKey = (staticClass as any).buildMethodName('get', key, 'Attribute');
+      const accessorKey = (staticClass as any).buildMethodName("get", key, "Attribute");
       const accessorDescriptor = staticClass._accessors.get(key);
 
       let value: any = undefined;
@@ -824,7 +829,7 @@ export abstract class Model {
         // Note: async accessors not called in sync context
       }
       // Fallback to instance method
-      else if (typeof (this as any)[accessorKey] === 'function') {
+      else if (typeof (this as any)[accessorKey] === "function") {
         value = (this as any)[accessorKey](value);
         // If it returns a Promise in sync context, warn and return undefined
         if (value instanceof Promise) {
@@ -853,9 +858,9 @@ export abstract class Model {
     // Return a proxy that allows direct field access
     return new Proxy(this, {
       get: (target: any, prop: PropertyKey, receiver: any) => {
-        if (typeof prop === 'string') {
+        if (typeof prop === "string") {
           // Special handling for 'this' keyword
-          if (prop === 'this') {
+          if (prop === "this") {
             return target;
           }
 
@@ -870,14 +875,14 @@ export abstract class Model {
           }
 
           // Check for methods
-          if (prop in target && typeof target[prop] === 'function') {
+          if (prop in target && typeof target[prop] === "function") {
             return target[prop].bind(target);
           }
 
           // Check for other properties
           if (prop in target) {
             const val = target[prop];
-            return typeof val === 'function' ? val.bind(target) : val;
+            return typeof val === "function" ? val.bind(target) : val;
           }
         }
 
@@ -886,7 +891,7 @@ export abstract class Model {
 
       set: (target: any, prop: PropertyKey, value: any, receiver: any) => {
         // Prevent modification of attributes from within accessors
-        if (typeof prop === 'string' && prop in target.attributes) {
+        if (typeof prop === "string" && prop in target.attributes) {
           throw new Error(`Cannot modify attribute '${prop}' from within an accessor`);
         }
         return Reflect.set(target, prop, value, receiver);
@@ -907,7 +912,7 @@ export abstract class Model {
 
     // Only handle accessors if they're appended or if we're accessing directly
     const shouldHandle =
-      isAppended || accessorDescriptor?.sync || typeof (this as any)[accessorKey] === 'function';
+      isAppended || accessorDescriptor?.sync || typeof (this as any)[accessorKey] === "function";
 
     if (shouldHandle) {
       return this.getAttribute(key, isAppended);
@@ -933,7 +938,7 @@ export abstract class Model {
       }
     }
     // Fallback to instance method
-    else if (typeof (this as any)[mutatorKey] === 'function') {
+    else if (typeof (this as any)[mutatorKey] === "function") {
       const mutatorThis = this.createAccessorContext();
       processedValue = (this as any)[mutatorKey].call(mutatorThis, value);
     } else {
@@ -1061,13 +1066,13 @@ export abstract class Model {
     if (!relation) return 0;
 
     switch (relation.type) {
-      case 'hasOne':
-      case 'belongsTo':
+      case "hasOne":
+      case "belongsTo":
         const single = await this[relationshipName]?.().first();
         return single ? 1 : 0;
 
-      case 'hasMany':
-      case 'belongsToMany':
+      case "hasMany":
+      case "belongsToMany":
         const many = await this[relationshipName]?.().get();
         return Array.isArray(many) ? many.length : 0;
 
@@ -1105,12 +1110,12 @@ export abstract class Model {
     } = options;
 
     if (visited.has(this)) {
-      return '[Circular]';
+      return "[Circular]";
     }
     visited.add(this);
 
     if (currentDepth >= maxDepth) {
-      return '[Max Depth Reached]';
+      return "[Max Depth Reached]";
     }
 
     const obj: any = {};
@@ -1138,8 +1143,8 @@ export abstract class Model {
     const includeAttr: string[] = [];
     (include || []).forEach((path) => {
       if (!path) return;
-      if (path.includes('.')) {
-        const segments = path.split('.');
+      if (path.includes(".")) {
+        const segments = path.split(".");
         const head = segments.shift() as string;
         directRelations.add(head);
         let cursor = (computedTree[head] = computedTree[head] || {});
@@ -1170,16 +1175,17 @@ export abstract class Model {
 
     // Add regular attributes
     for (const [key, value] of Object.entries(filteredAttributes)) {
-        if (
-            value &&
-            typeof value === 'object' &&
-            (value._bsontype === 'ObjectId' || value._bsontype === 'ObjectID') &&
-            ( typeof (value as any)?.toHexString === 'function' || typeof (value as any)?.toString === 'function')
-        ){
-            obj[key] = value.toString();
-        }else{
-            obj[key] = value;
-        }
+      if (
+        value &&
+        typeof value === "object" &&
+        (value._bsontype === "ObjectId" || value._bsontype === "ObjectID") &&
+        (typeof (value as any)?.toHexString === "function" ||
+          typeof (value as any)?.toString === "function")
+      ) {
+        obj[key] = value.toString();
+      } else {
+        obj[key] = value;
+      }
     }
 
     // Add appended attributes if withAccessors is true
@@ -1221,7 +1227,7 @@ export abstract class Model {
 
         const relType = allRelations[relName].type;
         obj[relName] =
-          relType === 'hasOne' || relType === 'belongsTo' || relType === 'morphOne' ? null : [];
+          relType === "hasOne" || relType === "belongsTo" || relType === "morphOne" ? null : [];
       }
     }
 
@@ -1247,12 +1253,12 @@ export abstract class Model {
     } = options;
 
     if (visited.has(this)) {
-      return '[Circular]';
+      return "[Circular]";
     }
     visited.add(this);
 
     if (currentDepth >= maxDepth) {
-      return '[Max Depth Reached]';
+      return "[Max Depth Reached]";
     }
 
     const obj: any = {};
@@ -1280,8 +1286,8 @@ export abstract class Model {
     const includeAttr: string[] = [];
     (include || []).forEach((path) => {
       if (!path) return;
-      if (path.includes('.')) {
-        const segments = path.split('.');
+      if (path.includes(".")) {
+        const segments = path.split(".");
         const head = segments.shift() as string;
         directRelations.add(head);
         let cursor = (computedTree[head] = computedTree[head] || {});
@@ -1311,17 +1317,19 @@ export abstract class Model {
     });
 
     // Add regular attributes
-      for (const [key, value] of Object.entries(filteredAttributes)) {
-          if ( value &&
-              typeof value === 'object' &&
-              (value._bsontype === 'ObjectId' || value._bsontype === 'ObjectID') &&
-              ( typeof (value as any)?.toHexString === 'function' || typeof (value as any)?.toString === 'function')
-          ){
-              obj[key] = value.toString();
-          }else{
-              obj[key] = value;
-          }
+    for (const [key, value] of Object.entries(filteredAttributes)) {
+      if (
+        value &&
+        typeof value === "object" &&
+        (value._bsontype === "ObjectId" || value._bsontype === "ObjectID") &&
+        (typeof (value as any)?.toHexString === "function" ||
+          typeof (value as any)?.toString === "function")
+      ) {
+        obj[key] = value.toString();
+      } else {
+        obj[key] = value;
       }
+    }
 
     // Add appended attributes if withAccessors is true
     if (withAccessors) {
@@ -1362,7 +1370,7 @@ export abstract class Model {
 
         const relType = allRelations[relName].type;
         obj[relName] =
-          relType === 'hasOne' || relType === 'belongsTo' || relType === 'morphOne' ? null : [];
+          relType === "hasOne" || relType === "belongsTo" || relType === "morphOne" ? null : [];
       });
     }
 
@@ -1431,7 +1439,7 @@ export abstract class Model {
       if (Array.isArray(val)) {
         obj[rel] = [];
         for (const v of val) {
-          if (!v || typeof v.toJSONAsync !== 'function') {
+          if (!v || typeof v.toJSONAsync !== "function") {
             obj[rel].push(v);
             continue;
           }
@@ -1444,7 +1452,7 @@ export abstract class Model {
             obj[rel].push(json);
           }
         }
-      } else if (val && typeof val.toJSONAsync === 'function') {
+      } else if (val && typeof val.toJSONAsync === "function") {
         const relationOptions = this.getRelationSerializationOptions(rel, options);
         relationOptions.relationTree = nestedTree;
         relationOptions.include = Object.keys(nestedTree || {});
@@ -1482,7 +1490,7 @@ export abstract class Model {
       if (Array.isArray(val)) {
         obj[rel] = val
           .map((v) => {
-            if (!v || typeof v.toJSON !== 'function') return v;
+            if (!v || typeof v.toJSON !== "function") return v;
             const relationOptions = this.getRelationSerializationOptions(rel, options);
             relationOptions.relationTree = nestedTree;
             relationOptions.include = Object.keys(nestedTree || {});
@@ -1490,7 +1498,7 @@ export abstract class Model {
             return v.toJSON(relationOptions);
           })
           .filter((v) => v !== undefined);
-      } else if (val && typeof val.toJSON === 'function') {
+      } else if (val && typeof val.toJSON === "function") {
         const relationOptions = this.getRelationSerializationOptions(rel, options);
         relationOptions.relationTree = nestedTree;
         relationOptions.include = Object.keys(nestedTree || {});
@@ -1584,7 +1592,7 @@ export abstract class Model {
     }
 
     // Then check if there's an instance method for this relationship
-    if (typeof (this as any)[relation] === 'function') {
+    if (typeof (this as any)[relation] === "function") {
       try {
         const relationInstance = (this as any)[relation]();
         return this.convertRelationToConfig(relationInstance, relation);
@@ -1606,28 +1614,28 @@ export abstract class Model {
   ): RelationshipConfig | null {
     if (relationInstance instanceof HasOne) {
       return {
-        type: 'hasOne',
+        type: "hasOne",
         model: (relationInstance as any).relatedModel,
         foreignKey: (relationInstance as any).foreignKey,
         localKey: (relationInstance as any).localKey,
       };
     } else if (relationInstance instanceof HasMany) {
       return {
-        type: 'hasMany',
+        type: "hasMany",
         model: (relationInstance as any).relatedModel,
         foreignKey: (relationInstance as any).foreignKey,
         localKey: (relationInstance as any).localKey,
       };
     } else if (relationInstance instanceof BelongsTo) {
       return {
-        type: 'belongsTo',
+        type: "belongsTo",
         model: (relationInstance as any).relatedModel,
         foreignKey: (relationInstance as any).foreignKey,
         ownerKey: (relationInstance as any).ownerKey,
       };
     } else if (relationInstance instanceof BelongsToMany) {
       return {
-        type: 'belongsToMany',
+        type: "belongsToMany",
         model: (relationInstance as any).relatedModel,
         table: (relationInstance as any).pivotTable,
         foreignKey: (relationInstance as any).foreignPivotKey,
@@ -1653,7 +1661,7 @@ export abstract class Model {
 
     // Add instance method relationships
     const instanceMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(this)).filter(
-      (prop) => typeof (this as any)[prop] === 'function' && prop !== 'constructor',
+      (prop) => typeof (this as any)[prop] === "function" && prop !== "constructor",
     );
 
     for (const methodName of instanceMethods) {
@@ -1767,9 +1775,9 @@ export abstract class Model {
     localKey?: string,
   ): HasOne<T> {
     const table = (model as unknown as typeof Model).getTable();
-    const singularTable = table.endsWith('s') ? table.slice(0, -1) : table;
+    const singularTable = table.endsWith("s") ? table.slice(0, -1) : table;
     const fk = foreignKey || `${singularTable}_id`;
-    const lk = localKey || (model as unknown as typeof Model).primaryKey || 'id';
+    const lk = localKey || (model as unknown as typeof Model).primaryKey || "id";
     return new HasOne(model as unknown as typeof Model, fk, lk, this);
   }
 
@@ -1780,9 +1788,9 @@ export abstract class Model {
     localKey?: string,
   ): HasMany<T> {
     const table = (model as unknown as typeof Model).getTable();
-    const singularTable = table.endsWith('s') ? table.slice(0, -1) : table;
+    const singularTable = table.endsWith("s") ? table.slice(0, -1) : table;
     const fk = foreignKey || `${singularTable}_id`;
-    const lk = localKey || (model as unknown as typeof Model).primaryKey || 'id';
+    const lk = localKey || (model as unknown as typeof Model).primaryKey || "id";
     return new HasMany(model as unknown as typeof Model, fk, lk, this);
   }
 
@@ -1794,14 +1802,14 @@ export abstract class Model {
   ): BelongsTo<T> {
     const relatedTable = (model as unknown as typeof Model).getTable();
     const fk = foreignKey || `${relatedTable}_id`;
-    const ok = ownerKey || (model as unknown as typeof Model).primaryKey || 'id';
+    const ok = ownerKey || (model as unknown as typeof Model).primaryKey || "id";
     return new BelongsTo(model as unknown as typeof Model, fk, ok, this);
   }
 
   belongsToMany<T extends Model>(
     this: any,
     model: new () => T,
-    table?: string | (new (...args: any[]) => Model) | (typeof Model),
+    table?: string | (new (...args: any[]) => Model) | typeof Model,
     foreignPivotKey?: string,
     relatedPivotKey?: string,
   ): BelongsToMany<T> {
@@ -1811,21 +1819,21 @@ export abstract class Model {
     // Detect if `table` is a pivot Model class (has static getTable) or a plain string
     let pivotTable: string;
     let pivotModel: typeof Model | undefined;
-    if (table && typeof table === 'function' && typeof (table as any).getTable === 'function') {
+    if (table && typeof table === "function" && typeof (table as any).getTable === "function") {
       pivotModel = table as unknown as typeof Model;
       // Ensure pivot model traits (e.g. SoftDeletes) are booted so flags are set
-      if (typeof (pivotModel as any).ensureBooted === 'function') {
+      if (typeof (pivotModel as any).ensureBooted === "function") {
         (pivotModel as any).ensureBooted();
       }
       pivotTable = (pivotModel as typeof Model).getTable();
     } else {
-      pivotTable = (table as string | undefined) || [parentTable, relatedTable].sort().join('_');
+      pivotTable = (table as string | undefined) || [parentTable, relatedTable].sort().join("_");
     }
 
     const foreignKey = foreignPivotKey || `${parentTable}_id`;
     const relatedKey = relatedPivotKey || `${relatedTable}_id`;
-    const parentPrimaryKey = (this.constructor as any).primaryKey || 'id';
-    const relatedPrimaryKey = (model as unknown as typeof Model).primaryKey || 'id';
+    const parentPrimaryKey = (this.constructor as any).primaryKey || "id";
+    const relatedPrimaryKey = (model as unknown as typeof Model).primaryKey || "id";
     return new BelongsToMany(
       model as unknown as typeof Model,
       pivotTable,
@@ -1838,21 +1846,13 @@ export abstract class Model {
     );
   }
 
-  morphOne<T extends Model>(
-    this: any,
-    model: new () => T,
-    name: string,
-  ): HasOne<T> {
+  morphOne<T extends Model>(this: any, model: new () => T, name: string): HasOne<T> {
     const morphType = `${name}_type`;
     const morphId = `${name}_id`;
     return this.hasOne(model, morphId).where(morphType, this.constructor.name);
   }
 
-  morphMany<T extends Model>(
-    this: any,
-    model: new () => T,
-    name: string,
-  ): HasMany<T> {
+  morphMany<T extends Model>(this: any, model: new () => T, name: string): HasMany<T> {
     const morphType = `${name}_type`;
     const morphId = `${name}_id`;
     return this.hasMany(model, morphId).where(morphType, this.constructor.name);
@@ -1883,19 +1883,19 @@ export abstract class Model {
     };
 
     // Fire saving event
-    const savingResult = await staticClass.fireModelEvent('saving', this, true);
+    const savingResult = await staticClass.fireModelEvent("saving", this, true);
     if (savingResult === false) {
       return this;
     }
 
     // Fire creating/updating events
     if (!this.__exists) {
-      const creatingResult = await staticClass.fireModelEvent('creating', this, true);
+      const creatingResult = await staticClass.fireModelEvent("creating", this, true);
       if (creatingResult === false) {
         return this;
       }
     } else {
-      const updatingResult = await staticClass.fireModelEvent('updating', this, true);
+      const updatingResult = await staticClass.fireModelEvent("updating", this, true);
       if (updatingResult === false) {
         return this;
       }
@@ -1903,20 +1903,20 @@ export abstract class Model {
 
     // Original save logic here...
     const table = staticClass.getTable();
-    const primaryKey = staticClass.primaryKey || 'id';
+    const primaryKey = staticClass.primaryKey || "id";
     const now = new Date();
 
     if ((staticClass as any).timestamps) {
-      if (!this.getAttribute('created_at')) {
-        this.setAttribute('created_at', now);
+      if (!this.getAttribute("created_at")) {
+        this.setAttribute("created_at", now);
       }
-      this.setAttribute('updated_at', now);
+      this.setAttribute("updated_at", now);
     }
 
     const attrs = { ...this.attributes } as any;
     const id = attrs[primaryKey];
     const exists = this.__exists;
-    const isMongo = getDbType() === 'mongodb';
+    const isMongo = getDbType() === "mongodb";
 
     const doInsert =
       !exists || options.force || (id === undefined && (staticClass as any).autoIncrement);
@@ -1925,7 +1925,7 @@ export abstract class Model {
       const c = mongoCollection(table);
       const normalizeForeignIds = (obj: Record<string, any>) => {
         Object.keys(obj).forEach((k) => {
-          if (!k || !k.endsWith('_id')) return;
+          if (!k || !k.endsWith("_id")) return;
           const v = obj[k];
           if (v === undefined || v === null) return;
           try {
@@ -1950,7 +1950,7 @@ export abstract class Model {
 
       if (doInsert) {
         const doc: any = { ...attrs };
-        if (primaryKey === 'id') {
+        if (primaryKey === "id") {
           if (doc.id) {
             try {
               doc._id = new ObjectId(String(doc.id));
@@ -1962,32 +1962,32 @@ export abstract class Model {
         }
         normalizeForeignIds(doc);
         const res = await c.insertOne(doc, sessionOpts);
-        if (primaryKey === 'id') this.setAttribute('id', String(res.insertedId));
+        if (primaryKey === "id") this.setAttribute("id", String(res.insertedId));
         this.__exists = true;
 
         // Fire created event
-        await staticClass.fireModelEvent('created', this);
+        await staticClass.fireModelEvent("created", this);
       } else {
         const dirty = this.getDirty();
         const setDoc: any = {};
         Object.keys(dirty).forEach((k) => {
-          if (k === primaryKey && primaryKey === 'id') return;
+          if (k === primaryKey && primaryKey === "id") return;
           setDoc[k] = dirty[k];
         });
         if (Object.keys(setDoc).length) {
           normalizeForeignIds(setDoc);
           const filter: any =
-            primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id };
+            primaryKey === "id" ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id };
           await c.updateOne(filter, { $set: setDoc }, sessionOpts);
 
           // Fire updated event
-          await staticClass.fireModelEvent('updated', this);
+          await staticClass.fireModelEvent("updated", this);
         }
       }
       this.original = { ...this.attributes };
 
       // Fire saved event
-      await staticClass.fireModelEvent('saved', this);
+      await staticClass.fireModelEvent("saved", this);
 
       return this;
     }
@@ -1999,12 +1999,13 @@ export abstract class Model {
       if (val instanceof Date || Buffer.isBuffer(val)) return val;
       try {
         const maybeObjId =
-            ((val as any)?._bsontype === 'ObjectID' || (val as any)?._bsontype === 'ObjectId') ||
-          (typeof ObjectId !== 'undefined' && val instanceof ObjectId);
+          (val as any)?._bsontype === "ObjectID" ||
+          (val as any)?._bsontype === "ObjectId" ||
+          (typeof ObjectId !== "undefined" && val instanceof ObjectId);
         if (maybeObjId) return String(val);
       } catch {}
       const t = typeof val;
-      if (t === 'object') {
+      if (t === "object") {
         try {
           return JSON.stringify(val);
         } catch {
@@ -2018,8 +2019,8 @@ export abstract class Model {
       const insertCols = Object.keys(attrs).filter(
         (k) => attrs[k] !== undefined && (k !== primaryKey || !(staticClass as any).autoIncrement),
       );
-      const placeholders = insertCols.map(() => '?').join(',');
-      const sql = `INSERT INTO ${table} (${insertCols.join(',')}) VALUES (${placeholders})`;
+      const placeholders = insertCols.map(() => "?").join(",");
+      const sql = `INSERT INTO ${table} (${insertCols.join(",")}) VALUES (${placeholders})`;
       const params = insertCols.map((c) => normalizeSqlParam(attrs[c]));
       const result: any = await DB.executeQuery<any>(sql, params);
       if ((staticClass as any).autoIncrement && result && result.insertId !== undefined) {
@@ -2028,25 +2029,25 @@ export abstract class Model {
       this.__exists = true;
 
       // Fire created event
-      await staticClass.fireModelEvent('created', this);
+      await staticClass.fireModelEvent("created", this);
     } else {
       const dirty = this.getDirty();
       const setCols = Object.keys(dirty).filter((k) => k !== primaryKey);
       if (setCols.length) {
-        const setSql = setCols.map((c) => `${c} = ?`).join(', ');
+        const setSql = setCols.map((c) => `${c} = ?`).join(", ");
         const sql = `UPDATE ${table} SET ${setSql} WHERE ${primaryKey} = ?`;
         const params = [...setCols.map((c) => normalizeSqlParam(dirty[c])), id];
         await DB.executeQuery<any>(sql, params);
 
         // Fire updated event
-        await staticClass.fireModelEvent('updated', this);
+        await staticClass.fireModelEvent("updated", this);
       }
     }
 
     this.original = { ...this.attributes };
 
     // Fire saved event
-    await staticClass.fireModelEvent('saved', this);
+    await staticClass.fireModelEvent("saved", this);
 
     return this;
   }
@@ -2060,32 +2061,32 @@ export abstract class Model {
     };
 
     // Fire deleting event
-    const deletingResult = await staticClass.fireModelEvent('deleting', this, true);
+    const deletingResult = await staticClass.fireModelEvent("deleting", this, true);
     if (deletingResult === false) {
       return false;
     }
 
     const table = staticClass.getTable();
-    const primaryKey = staticClass.primaryKey || 'id';
+    const primaryKey = staticClass.primaryKey || "id";
     const id = this.getAttribute(primaryKey);
     if (id === undefined || id === null) return false;
 
     let result = false;
 
-    if (getDbType() === 'mongodb') {
+    if (getDbType() === "mongodb") {
       const c = mongoCollection(table);
       const sessionOpts = DB.getSessionOptions();
       if ((staticClass as any).softDeletes && !force) {
         await c.updateOne(
-          primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+          primaryKey === "id" ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
           { $set: { deleted_at: new Date() } },
           sessionOpts,
         );
-        this.setAttribute('deleted_at', new Date());
+        this.setAttribute("deleted_at", new Date());
         result = true;
       } else {
         await c.deleteOne(
-          primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+          primaryKey === "id" ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
           sessionOpts,
         );
         result = true;
@@ -2093,7 +2094,7 @@ export abstract class Model {
     } else {
       if ((staticClass as any).softDeletes && !force) {
         const now = new Date();
-        this.setAttribute('deleted_at', now);
+        this.setAttribute("deleted_at", now);
         const sql = `UPDATE ${table} SET deleted_at = ? WHERE ${primaryKey} = ?`;
         await DB.executeQuery<any>(sql, [now, id]);
         result = true;
@@ -2106,7 +2107,7 @@ export abstract class Model {
 
     if (result) {
       // Fire deleted event
-      await staticClass.fireModelEvent('deleted', this);
+      await staticClass.fireModelEvent("deleted", this);
     }
 
     return result;
@@ -2122,25 +2123,25 @@ export abstract class Model {
     if (!(staticClass as any).softDeletes) return false;
 
     // Fire restoring event
-    const restoringResult = await staticClass.fireModelEvent('restoring', this, true);
+    const restoringResult = await staticClass.fireModelEvent("restoring", this, true);
     if (restoringResult === false) {
       return false;
     }
 
     const table = staticClass.getTable();
-    const primaryKey = staticClass.primaryKey || 'id';
+    const primaryKey = staticClass.primaryKey || "id";
     const id = this.getAttribute(primaryKey);
     if (id === undefined || id === null) return false;
 
-    this.setAttribute('deleted_at', null);
+    this.setAttribute("deleted_at", null);
 
     let result = false;
 
-    if (getDbType() === 'mongodb') {
+    if (getDbType() === "mongodb") {
       const c = mongoCollection(table);
       const sessionOpts = DB.getSessionOptions();
       await c.updateOne(
-        primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+        primaryKey === "id" ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
         { $set: { deleted_at: null } },
         sessionOpts,
       );
@@ -2153,7 +2154,7 @@ export abstract class Model {
 
     if (result) {
       // Fire restored event
-      await staticClass.fireModelEvent('restored', this);
+      await staticClass.fireModelEvent("restored", this);
     }
 
     return result;
@@ -2171,24 +2172,24 @@ export abstract class Model {
       softDeletes?: boolean;
     };
     const table = staticClass.getTable();
-    const primaryKey = staticClass.primaryKey || 'id';
+    const primaryKey = staticClass.primaryKey || "id";
     const id = this.getAttribute(primaryKey);
     if (id === undefined || id === null) return false;
 
-    if (getDbType() === 'mongodb') {
+    if (getDbType() === "mongodb") {
       const c = mongoCollection(table);
       const sessionOpts = DB.getSessionOptions();
       if ((staticClass as any).softDeletes && !force) {
         await c.updateOne(
-          primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+          primaryKey === "id" ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
           { $set: { deleted_at: new Date() } },
           sessionOpts,
         );
-        this.setAttribute('deleted_at', new Date());
+        this.setAttribute("deleted_at", new Date());
         return true;
       } else {
         await c.deleteOne(
-          primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+          primaryKey === "id" ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
           sessionOpts,
         );
         return true;
@@ -2197,7 +2198,7 @@ export abstract class Model {
 
     if ((staticClass as any).softDeletes && !force) {
       const now = new Date();
-      this.setAttribute('deleted_at', now);
+      this.setAttribute("deleted_at", now);
       const sql = `UPDATE ${table} SET deleted_at = ? WHERE ${primaryKey} = ?`;
       await DB.executeQuery<any>(sql, [now, id]);
       return true;
@@ -2217,17 +2218,17 @@ export abstract class Model {
     if (!(staticClass as any).softDeletes) return false;
 
     const table = staticClass.getTable();
-    const primaryKey = staticClass.primaryKey || 'id';
+    const primaryKey = staticClass.primaryKey || "id";
     const id = this.getAttribute(primaryKey);
     if (id === undefined || id === null) return false;
 
-    this.setAttribute('deleted_at', null);
+    this.setAttribute("deleted_at", null);
 
-    if (getDbType() === 'mongodb') {
+    if (getDbType() === "mongodb") {
       const c = mongoCollection(table);
       const sessionOpts = DB.getSessionOptions();
       await c.updateOne(
-        primaryKey === 'id' ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
+        primaryKey === "id" ? { _id: new ObjectId(String(id)) } : { [primaryKey]: id },
         { $set: { deleted_at: null } },
         sessionOpts,
       );
@@ -2245,7 +2246,7 @@ export abstract class Model {
 
   async refresh(): Promise<this> {
     const staticClass = this.constructor as typeof Model;
-    const primaryKey = staticClass.primaryKey || 'id';
+    const primaryKey = staticClass.primaryKey || "id";
     const id = this.getAttribute(primaryKey);
 
     if (id === undefined || id === null) return this;
@@ -2265,7 +2266,7 @@ export abstract class Model {
     const attributes = { ...this.attributes };
 
     // Remove primary key and excluded attributes
-    delete attributes[staticClass.primaryKey || 'id'];
+    delete attributes[staticClass.primaryKey || "id"];
     except.forEach((attr) => delete attributes[attr]);
 
     replicated.fill(attributes);
@@ -2291,6 +2292,50 @@ export abstract class Model {
       created.push(await this.create(row));
     }
     return created;
+  }
+
+  /**
+   * Find a model matching the attributes or create a new one, then update with values
+   * @param attributes - The attributes to find the model by
+   * @param values - The values to update or create the model with
+   * @returns The model instance (existing or newly created)
+   */
+  static async updateOrCreate<M extends typeof Model>(
+    this: M,
+    attributes: ModelAttributes,
+    values: ModelAttributes = {},
+  ): Promise<InstanceType<M>> {
+    // Find existing record matching the attributes
+    const query = this.query<M>();
+    Object.entries(attributes).forEach(([key, value]) => {
+      query.where(key, value);
+    });
+
+    const existing = await query.first();
+
+    if (existing) {
+      // Update existing record with values
+      await existing.update(values);
+      return existing;
+    } else {
+      // Create new record with merged attributes and values
+      const mergedAttributes = { ...attributes, ...values };
+      return this.create(mergedAttributes);
+    }
+  }
+
+  /**
+   * Alias for updateOrCreate method
+   * @param attributes - The attributes to find the model by
+   * @param values - The values to update or create the model with
+   * @returns The model instance (existing or newly created)
+   */
+  static async createOrUpdate<M extends typeof Model>(
+    this: M,
+    attributes: ModelAttributes,
+    values: ModelAttributes = {},
+  ): Promise<InstanceType<M>> {
+    return this.updateOrCreate(attributes, values);
   }
 
   static query_<M extends typeof Model>(this: M): EloquentBuilder<InstanceType<M>> {
@@ -2362,7 +2407,7 @@ export abstract class Model {
     id: number | string,
   ): Promise<InstanceType<M>> {
     const found = await this.find(id);
-    if (!found) throw new Error(`${(this as any).name || 'Model'} not found`);
+    if (!found) throw new Error(`${(this as any).name || "Model"} not found`);
     return found as InstanceType<M>;
   }
 
@@ -2377,7 +2422,7 @@ export abstract class Model {
   // Static table name resolution
   static getTable(): string {
     // If table name is explicitly set, use it
-    if (this.table && this.table !== '') {
+    if (this.table && this.table !== "") {
       return this.table;
     }
 
@@ -2386,9 +2431,9 @@ export abstract class Model {
 
     // Convert PascalCase to snake_case
     tableName = tableName
-      .replace(/([A-Z])/g, '_$1')
+      .replace(/([A-Z])/g, "_$1")
       .toLowerCase()
-      .replace(/^_/, '');
+      .replace(/^_/, "");
 
     // Pluralize
     tableName = this.pluralize(tableName);
@@ -2400,33 +2445,33 @@ export abstract class Model {
   private castAttribute(key: string, value: any): any {
     const staticClass = this.constructor as typeof Model;
     const castType = staticClass.casts[key];
-    if (typeof castType === 'function') {
+    if (typeof castType === "function") {
       return castType(value);
     }
     switch (castType) {
-      case 'int':
-      case 'integer':
+      case "int":
+      case "integer":
         return parseInt(value, 10);
-      case 'real':
-      case 'float':
-      case 'double':
+      case "real":
+      case "float":
+      case "double":
         return parseFloat(value);
-      case 'string':
+      case "string":
         return String(value);
-      case 'bool':
-      case 'boolean':
+      case "bool":
+      case "boolean":
         return Boolean(value);
-      case 'object':
-      case 'array':
+      case "object":
+      case "array":
         return JSON.parse(value);
-      case 'json':
-        return typeof value === 'string' ? JSON.parse(value) : value;
-      case 'date':
-      case 'datetime':
+      case "json":
+        return typeof value === "string" ? JSON.parse(value) : value;
+      case "date":
+      case "datetime":
         return new Date(value);
-      case 'timestamp':
+      case "timestamp":
         return new Date(value).getTime();
-      case 'collection':
+      case "collection":
         return new Map(Object.entries(value));
       default:
         return value;
@@ -2442,65 +2487,65 @@ export abstract class Model {
     // Comprehensive irregular plurals
     const irregularPlurals: Record<string, string> = {
       // Common irregulars
-      person: 'people',
-      man: 'men',
-      woman: 'women',
-      child: 'children',
-      foot: 'feet',
-      tooth: 'teeth',
-      goose: 'geese',
-      mouse: 'mice',
-      louse: 'lice',
-      ox: 'oxen',
-      die: 'dice',
-      penny: 'pence',
+      person: "people",
+      man: "men",
+      woman: "women",
+      child: "children",
+      foot: "feet",
+      tooth: "teeth",
+      goose: "geese",
+      mouse: "mice",
+      louse: "lice",
+      ox: "oxen",
+      die: "dice",
+      penny: "pence",
 
       // Latin/Greek plurals
-      appendix: 'appendices',
-      index: 'indices',
-      matrix: 'matrices',
-      vertex: 'vertices',
-      crisis: 'crises',
-      analysis: 'analyses',
-      thesis: 'theses',
-      criterion: 'criteria',
-      phenomenon: 'phenomena',
-      datum: 'data',
-      medium: 'media',
-      bacterium: 'bacteria',
-      curriculum: 'curricula',
-      stimulus: 'stimuli',
-      alumnus: 'alumni',
-      focus: 'foci',
-      nucleus: 'nuclei',
-      syllabus: 'syllabi',
-      fungus: 'fungi',
-      cactus: 'cacti',
+      appendix: "appendices",
+      index: "indices",
+      matrix: "matrices",
+      vertex: "vertices",
+      crisis: "crises",
+      analysis: "analyses",
+      thesis: "theses",
+      criterion: "criteria",
+      phenomenon: "phenomena",
+      datum: "data",
+      medium: "media",
+      bacterium: "bacteria",
+      curriculum: "curricula",
+      stimulus: "stimuli",
+      alumnus: "alumni",
+      focus: "foci",
+      nucleus: "nuclei",
+      syllabus: "syllabi",
+      fungus: "fungi",
+      cactus: "cacti",
 
       // Unchanging plurals
-      sheep: 'sheep',
-      deer: 'deer',
-      fish: 'fish',
-      species: 'species',
-      aircraft: 'aircraft',
-      series: 'series',
-      means: 'means',
+      sheep: "sheep",
+      deer: "deer",
+      fish: "fish",
+      species: "species",
+      aircraft: "aircraft",
+      series: "series",
+      means: "means",
     };
 
     // Uncountable nouns (stay the same)
     const uncountable = new Set([
-      'equipment',
-      'information',
-      'rice',
-      'money',
-      'species',
-      'series',
-      'fish',
-      'sheep',
-      'deer',
-      'aircraft',
-      'news',
-      'education',
+      "equipment",
+      "information",
+      "rice",
+      "money",
+      "species",
+      "series",
+      "fish",
+      "sheep",
+      "deer",
+      "aircraft",
+      "news",
+      "education",
     ]);
 
     const lowerWord = word.toLowerCase();
@@ -2526,22 +2571,22 @@ export abstract class Model {
     // Pluralization rules in order of specificity
     const pluralRules = [
       // Words ending in -is (Greek origin)
-      [/^(.*)is$/i, '$1es'],
+      [/^(.*)is$/i, "$1es"],
       // Words ending in -us (Latin origin)
-      [/^(.*)us$/i, '$1i'],
+      [/^(.*)us$/i, "$1i"],
       // Words ending in -on (Greek origin)
-      [/^(.*)on$/i, '$1a'],
+      [/^(.*)on$/i, "$1a"],
       // Words ending in -s, -x, -z, -ch, -sh
-      [/^(.*)(s|sh?|ch|z|x)$/i, '$1$2es'],
+      [/^(.*)(s|sh?|ch|z|x)$/i, "$1$2es"],
       // Words ending in -f or -fe
-      [/^(.*[aeiou]?)f$/i, '$1ves'],
-      [/^(.*)fe$/i, '$1ves'],
+      [/^(.*[aeiou]?)f$/i, "$1ves"],
+      [/^(.*)fe$/i, "$1ves"],
       // Words ending in -y
-      [/^(.*[^aeiou])y$/i, '$1ies'],
+      [/^(.*[^aeiou])y$/i, "$1ies"],
       // Words ending in -o
-      [/^(.*[^aeiou])o$/i, '$1oes'],
+      [/^(.*[^aeiou])o$/i, "$1oes"],
       // Default rule
-      [/^(.*)$/i, '$1s'],
+      [/^(.*)$/i, "$1s"],
     ];
 
     // Apply rules
@@ -2558,11 +2603,11 @@ export abstract class Model {
     }
 
     // Fallback
-    return word + 's';
+    return word + "s";
   }
 
   private static looksPlural(word: string): boolean {
-    const pluralEndings = ['s', 'es', 'ies', 'ves', 'i', 'a', 'en'];
+    const pluralEndings = ["s", "es", "ies", "ves", "i", "a", "en"];
     return pluralEndings.some((ending) => word.toLowerCase().endsWith(ending));
   }
 
@@ -2579,7 +2624,7 @@ export abstract class Model {
     if (names.length === 0) return this;
 
     // Determine primary key and value from the model class/instance
-    const pk = (staticClass as any).primaryKey || 'id';
+    const pk = (staticClass as any).primaryKey || "id";
     const pkValue = this.getAttribute(pk);
     if (pkValue === undefined || pkValue === null) return this;
 
@@ -2670,8 +2715,8 @@ export abstract class Model {
 }
 
 // Helper types for augmenting Model with trait instance and static members
-type TraitInstance<T extends ClassBasedTrait> = Omit<InstanceType<T>, 'constructor'>;
-type TraitStatics<T extends ClassBasedTrait> = Omit<T, 'prototype'>;
+type TraitInstance<T extends ClassBasedTrait> = Omit<InstanceType<T>, "constructor">;
+type TraitStatics<T extends ClassBasedTrait> = Omit<T, "prototype">;
 
 type MergeInstances<Traits extends readonly ClassBasedTrait[]> = Traits extends [
   infer A,

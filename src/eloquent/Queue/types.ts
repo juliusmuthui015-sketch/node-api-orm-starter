@@ -8,124 +8,104 @@
 */
 
 export interface SerializedJob {
-    id: string;
-    uuid: string;
-    displayName: string;
-    job: string;           // Job class name
-    data: string;          // JSON serialized payload
-    queue: string;
-    attempts: number;
-    maxTries: number;
-    timeout: number;
-    backoff: number | number[];
-    retryUntil: number | null;
-    createdAt: number;
-    availableAt: number;
-    reservedAt: number | null;
+  id: string;
+  uuid: string;
+  displayName: string;
+  job: string; // Job class name
+  data: string; // JSON serialized payload (may be encrypted)
+  queue: string;
+  attempts: number;
+  maxTries: number;
+  maxExceptions: number;
+  exceptionCount: number;
+  timeout: number;
+  backoff: number | number[];
+  retryUntil: number | null;
+  encrypted: boolean;
+  createdAt: number;
+  availableAt: number;
+  reservedAt: number | null;
 }
 
 export interface FailedJob {
-    id: number;
-    uuid: string;
-    connection: string;
-    queue: string;
-    payload: string;
-    exception: string;
-    failedAt: Date;
+  id: number;
+  uuid: string;
+  connection: string;
+  queue: string;
+  payload: string;
+  exception: string;
+  failedAt: Date;
 }
 
 export interface QueueDriverInterface {
-    /**
-     * Get the size of the queue.
-     */
-    size(queue?: string): Promise<number>;
+  size(queue?: string): Promise<number>;
+  push(job: SerializedJob, queue?: string): Promise<string>;
+  later(delay: number, job: SerializedJob, queue?: string): Promise<string>;
+  pop(queue?: string): Promise<SerializedJob | null>;
+  delete(job: SerializedJob, queue?: string): Promise<void>;
+  release(job: SerializedJob, delay: number, queue?: string): Promise<void>;
+  clear(queue?: string): Promise<number>;
+  getJobs(queue?: string): Promise<SerializedJob[]>;
+}
 
-    /**
-     * Push a new job onto the queue.
-     */
-    push(job: SerializedJob, queue?: string): Promise<string>;
-
-    /**
-     * Push a new job onto the queue after a delay.
-     */
-    later(delay: number, job: SerializedJob, queue?: string): Promise<string>;
-
-    /**
-     * Pop the next job off of the queue.
-     */
-    pop(queue?: string): Promise<SerializedJob | null>;
-
-    /**
-     * Delete a reserved job from the queue.
-     */
-    delete(job: SerializedJob, queue?: string): Promise<void>;
-
-    /**
-     * Release a reserved job back onto the queue.
-     */
-    release(job: SerializedJob, delay: number, queue?: string): Promise<void>;
-
-    /**
-     * Clear all jobs from the queue.
-     */
-    clear(queue?: string): Promise<number>;
-
-    /**
-     * Get all jobs from the queue (for inspection).
-     */
-    getJobs(queue?: string): Promise<SerializedJob[]>;
+export interface FailedJobsInterface {
+  logFailed(connection: string, queue: string, job: SerializedJob, exception: Error): Promise<void>;
+  getFailedJobs(): Promise<any[]>;
+  retryFailed(uuid: string): Promise<boolean>;
+  forgetFailed(uuid: string): Promise<boolean>;
+  flushFailed(): Promise<number>;
 }
 
 export interface JobOptions {
-    queue?: string;
-    connection?: string;
-    delay?: number;
-    tries?: number;
-    timeout?: number;
-    backoff?: number | number[];
-    retryUntil?: Date;
-    uniqueId?: string;
-    uniqueFor?: number;
+  queue?: string;
+  connection?: string;
+  delay?: number;
+  tries?: number;
+  timeout?: number;
+  backoff?: number | number[];
+  retryUntil?: Date;
+  uniqueId?: string;
+  uniqueFor?: number;
 }
 
 export interface ScheduleFrequency {
-    expression: string;
-    timezone?: string;
+  expression: string;
+  timezone?: string;
 }
 
 export interface ScheduledTask {
-    name: string;
-    command: string | (() => Promise<void>);
-    frequency: ScheduleFrequency;
-    description?: string;
-    withoutOverlapping?: boolean;
-    onOneServer?: boolean;
-    evenInMaintenanceMode?: boolean;
-    lastRun?: Date;
-    nextRun?: Date;
+  name: string;
+  command: string | (() => Promise<void>);
+  frequency: ScheduleFrequency;
+  description?: string;
+  withoutOverlapping?: boolean;
+  onOneServer?: boolean;
+  evenInMaintenanceMode?: boolean;
+  lastRun?: Date;
+  nextRun?: Date;
 }
 
-export type JobStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'released';
+export type JobStatus = "pending" | "processing" | "completed" | "failed" | "released";
 
 export interface WorkerOptions {
-    connection?: string;
-    queue?: string | string[];
-    delay?: number;
-    memory?: number;
-    timeout?: number;
-    sleep?: number;
-    maxTries?: number;
-    maxJobs?: number;
-    maxTime?: number;
-    force?: boolean;
-    stopWhenEmpty?: boolean;
-    rest?: number;
-    verbose?: boolean;
+  connection?: string;
+  queue?: string | string[];
+  delay?: number;
+  memory?: number;
+  timeout?: number;
+  sleep?: number;
+  maxTries?: number;
+  maxJobs?: number;
+  maxTime?: number;
+  force?: boolean;
+  stopWhenEmpty?: boolean;
+  rest?: number;
+  verbose?: boolean;
 }
 
 export interface JobEvent {
-    connectionName: string;
-    job: SerializedJob;
+  connectionName: string;
+  job: SerializedJob;
 }
 
 export interface JobProcessingEvent extends JobEvent {}
@@ -133,10 +113,9 @@ export interface JobProcessingEvent extends JobEvent {}
 export interface JobProcessedEvent extends JobEvent {}
 
 export interface JobFailedEvent extends JobEvent {
-    exception: Error;
+  exception: Error;
 }
 
 export interface JobExceptionOccurredEvent extends JobEvent {
-    exception: Error;
+  exception: Error;
 }
-

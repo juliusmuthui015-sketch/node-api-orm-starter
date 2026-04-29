@@ -1,5 +1,11 @@
-import {NextFunction, RequestHandler} from 'express';
-import { middlewareStack, MiddlewareStack, Middleware, IMiddleware, MiddlewareGroupConfig } from './MiddlewareStack';
+import { NextFunction, RequestHandler } from "express";
+import {
+  middlewareStack,
+  MiddlewareStack,
+  Middleware,
+  IMiddleware,
+  MiddlewareGroupConfig,
+} from "./MiddlewareStack";
 
 export type MiddlewareEntry = RequestHandler | ((...args: any[]) => RequestHandler);
 
@@ -29,11 +35,11 @@ export function getMiddlewareStack(): MiddlewareStack {
 export function resolveMiddleware(
   mw: string | RequestHandler | (RequestHandler | string)[],
 ): RequestHandler | RequestHandler[] {
-  if (typeof mw === 'function') return mw;
+  if (typeof mw === "function") return mw;
   if (Array.isArray(mw)) return mw.map((m) => resolveMiddleware(m) as RequestHandler);
 
   // string -> maybe 'auth' or 'can:view_users' or 'role:admin' or a group like 'web'
-  const [key, rest] = (mw as string).split(':');
+  const [key, rest] = (mw as string).split(":");
 
   // Try the new MiddlewareStack first for groups
   if (middlewareStack.hasGroup(key) && rest === undefined) {
@@ -42,18 +48,20 @@ export function resolveMiddleware(
 
   // Try the new MiddlewareStack for aliases
   if (middlewareStack.hasAlias(key)) {
-    const args = rest ? rest.split(',').map((s) => s.trim()) : [];
-    return middlewareStack.resolve(middlewareStack.getAlias(key)!, args) as RequestHandler | RequestHandler[];
+    const args = rest ? rest.split(",").map((s) => s.trim()) : [];
+    return middlewareStack.resolve(middlewareStack.getAlias(key)!, args) as
+      | RequestHandler
+      | RequestHandler[];
   }
 
   // Fall back to legacy registry
-  if (rest !== undefined && rest.split(',').length > 0) {
-    const args = rest ? rest.split(',').map((s) => s.trim()) : [];
+  if (rest !== undefined && rest.split(",").length > 0) {
+    const args = rest ? rest.split(",").map((s) => s.trim()) : [];
     const factory = registry[key] as any;
     if (!factory) {
       // Attempt to lazily load HTTP kernel middleware
       try {
-        require('@/app/Http/Middleware');
+        require("@/app/Http/Middleware");
       } catch (e) {
         // ignore
       }
@@ -69,7 +77,7 @@ export function resolveMiddleware(
 
   // Try to require HTTP middleware module and retry
   try {
-    require('@/app/Http/Middleware');
+    require("@/app/Http/Middleware");
   } catch (e) {
     // ignore
   }
@@ -80,4 +88,3 @@ export function resolveMiddleware(
 }
 // Re-export from MiddlewareStack
 export { MiddlewareStack, Middleware, IMiddleware, MiddlewareGroupConfig, middlewareStack };
-

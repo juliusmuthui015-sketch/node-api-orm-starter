@@ -7,8 +7,7 @@
 |
 */
 
-export { SmtpDriver } from './SmtpDriver';
-export { LogDriver } from './LogDriver';
-export { ArrayDriver } from './ArrayDriver';
-export { FailoverDriver } from './FailoverDriver';
-
+export { SmtpDriver } from "./SmtpDriver";
+export { LogDriver } from "./LogDriver";
+export { ArrayDriver } from "./ArrayDriver";
+export { FailoverDriver } from "./FailoverDriver";

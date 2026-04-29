@@ -8,9 +8,9 @@
 |
 */
 
-import { PoolConnection, Pool } from 'mysql2/promise';
-import { getPool, getDbType, query as dbQuery, getMongoDb } from '@/config/db.config';
-import { ClientSession, Db, Collection as MongoCollection, Document } from 'mongodb';
+import { PoolConnection, Pool } from "mysql2/promise";
+import { getPool, getDbType, query as dbQuery, getMongoDb } from "@/config/db.config";
+import { ClientSession, Db, Collection as MongoCollection, Document } from "mongodb";
 
 // ============================================================================
 // TRANSACTION INTERFACES
@@ -99,7 +99,7 @@ export class Transaction implements IMysqlTransaction {
 
   async commit(): Promise<void> {
     if (this.committed || this.rolledBack) {
-      throw new Error('Transaction already completed');
+      throw new Error("Transaction already completed");
     }
     await this.connection.commit();
     this.committed = true;
@@ -146,7 +146,7 @@ export class MongoTransaction implements IMongoTransaction {
 
   async commit(): Promise<void> {
     if (this.committed || this.rolledBack) {
-      throw new Error('Transaction already completed');
+      throw new Error("Transaction already completed");
     }
     await this.session.commitTransaction();
     this.committed = true;
@@ -243,8 +243,8 @@ export class DB {
    * This is the main method that Models should use for all database operations
    */
   static async executeQuery<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-    if (getDbType() === 'mongodb') {
-      throw new Error('executeQuery() is not supported for MongoDB');
+    if (getDbType() === "mongodb") {
+      throw new Error("executeQuery() is not supported for MongoDB");
     }
 
     if (this.currentMysqlTransaction) {
@@ -258,8 +258,10 @@ export class DB {
    * Execute a raw SQL query (MySQL only)
    */
   static async query<T = any>(sql: string, bindings: any[] = []): Promise<T[]> {
-    if (getDbType() === 'mongodb') {
-      throw new Error('DB.query() is not supported for MongoDB. Use DB.collection() methods instead.');
+    if (getDbType() === "mongodb") {
+      throw new Error(
+        "DB.query() is not supported for MongoDB. Use DB.collection() methods instead.",
+      );
     }
     return this.executeQuery<T>(sql, bindings);
   }
@@ -275,8 +277,10 @@ export class DB {
    * Execute a raw INSERT query (MySQL only)
    */
   static async insert(sql: string, bindings: any[] = []): Promise<number> {
-    if (getDbType() === 'mongodb') {
-      throw new Error('DB.insert() is not supported for MongoDB. Use DB.collection().insertOne() instead.');
+    if (getDbType() === "mongodb") {
+      throw new Error(
+        "DB.insert() is not supported for MongoDB. Use DB.collection().insertOne() instead.",
+      );
     }
     if (this.currentMysqlTransaction) {
       return this.currentMysqlTransaction.insert(sql, bindings);
@@ -289,8 +293,10 @@ export class DB {
    * Execute a raw UPDATE query (MySQL only)
    */
   static async update(sql: string, bindings: any[] = []): Promise<number> {
-    if (getDbType() === 'mongodb') {
-      throw new Error('DB.update() is not supported for MongoDB. Use DB.collection().updateOne() instead.');
+    if (getDbType() === "mongodb") {
+      throw new Error(
+        "DB.update() is not supported for MongoDB. Use DB.collection().updateOne() instead.",
+      );
     }
     if (this.currentMysqlTransaction) {
       return this.currentMysqlTransaction.update(sql, bindings);
@@ -303,8 +309,10 @@ export class DB {
    * Execute a raw DELETE query (MySQL only)
    */
   static async delete(sql: string, bindings: any[] = []): Promise<number> {
-    if (getDbType() === 'mongodb') {
-      throw new Error('DB.delete() is not supported for MongoDB. Use DB.collection().deleteOne() instead.');
+    if (getDbType() === "mongodb") {
+      throw new Error(
+        "DB.delete() is not supported for MongoDB. Use DB.collection().deleteOne() instead.",
+      );
     }
     if (this.currentMysqlTransaction) {
       return this.currentMysqlTransaction.delete(sql, bindings);
@@ -317,8 +325,8 @@ export class DB {
    * Execute a statement (for DDL or other non-returning queries) - MySQL only
    */
   static async statement(sql: string, bindings: any[] = []): Promise<boolean> {
-    if (getDbType() === 'mongodb') {
-      throw new Error('DB.statement() is not supported for MongoDB.');
+    if (getDbType() === "mongodb") {
+      throw new Error("DB.statement() is not supported for MongoDB.");
     }
     if (this.currentMysqlTransaction) {
       return this.currentMysqlTransaction.statement(sql, bindings);
@@ -331,8 +339,8 @@ export class DB {
    * Execute an unprepared query (without parameter binding) - MySQL only
    */
   static async unprepared(sql: string): Promise<boolean> {
-    if (getDbType() === 'mongodb') {
-      throw new Error('DB.unprepared() is not supported for MongoDB.');
+    if (getDbType() === "mongodb") {
+      throw new Error("DB.unprepared() is not supported for MongoDB.");
     }
     await dbQuery(sql);
     return true;
@@ -355,8 +363,8 @@ export class DB {
     first: () => Promise<any>;
     count: () => Promise<number>;
   } {
-    if (getDbType() === 'mongodb') {
-      throw new Error('DB.table() is not supported for MongoDB. Use DB.collection() instead.');
+    if (getDbType() === "mongodb") {
+      throw new Error("DB.table() is not supported for MongoDB. Use DB.collection() instead.");
     }
 
     // Return a simple query builder interface for raw table operations
@@ -364,17 +372,17 @@ export class DB {
     let whereClauses: { column: string; operator: string; value: any }[] = [];
 
     const buildWhere = () => {
-      if (whereClauses.length === 0) return { sql: '', params: [] };
+      if (whereClauses.length === 0) return { sql: "", params: [] };
       const parts = whereClauses.map((w, i) => {
-        const prefix = i === 0 ? ' WHERE ' : ' AND ';
+        const prefix = i === 0 ? " WHERE " : " AND ";
         return `${prefix}${w.column} ${w.operator} ?`;
       });
-      return { sql: parts.join(''), params: whereClauses.map(w => w.value) };
+      return { sql: parts.join(""), params: whereClauses.map((w) => w.value) };
     };
 
     return {
       where(column: string, operatorOrValue: any, value?: any) {
-        const operator = value !== undefined ? operatorOrValue : '=';
+        const operator = value !== undefined ? operatorOrValue : "=";
         const val = value !== undefined ? value : operatorOrValue;
         whereClauses.push({ column, operator, value: val });
         return this;
@@ -382,14 +390,14 @@ export class DB {
       async insert(data: Record<string, any>): Promise<number> {
         const columns = Object.keys(data);
         const values = Object.values(data);
-        const placeholders = columns.map(() => '?').join(', ');
-        const sql = `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
+        const placeholders = columns.map(() => "?").join(", ");
+        const sql = `INSERT INTO ${tableName} (${columns.join(", ")}) VALUES (${placeholders})`;
         return DB.insert(sql, values);
       },
       async update(data: Record<string, any>): Promise<number> {
         const columns = Object.keys(data);
         const values = Object.values(data);
-        const setClause = columns.map(c => `${c} = ?`).join(', ');
+        const setClause = columns.map((c) => `${c} = ?`).join(", ");
         const where = buildWhere();
         const sql = `UPDATE ${tableName} SET ${setClause}${where.sql}`;
         return DB.update(sql, [...values, ...where.params]);
@@ -415,7 +423,7 @@ export class DB {
         const sql = `SELECT COUNT(*) as count FROM ${tableName}${where.sql}`;
         const results = await DB.query<{ count: number }>(sql, where.params);
         return Number(results[0]?.count || 0);
-      }
+      },
     };
   }
 
@@ -423,8 +431,8 @@ export class DB {
    * Get a MongoDB collection (MongoDB only)
    */
   static collection<T extends Document = Document>(name: string): MongoCollection<T> {
-    if (getDbType() !== 'mongodb') {
-      throw new Error('DB.collection() is only supported for MongoDB. Use DB.table() instead.');
+    if (getDbType() !== "mongodb") {
+      throw new Error("DB.collection() is only supported for MongoDB. Use DB.table() instead.");
     }
     const db = getMongoDb();
     return db.collection<T>(name);
@@ -455,7 +463,9 @@ export class DB {
    *   await collection.insertOne({ name: 'John' }, sessionOpts);
    * });
    */
-  static async withSession<T>(callback: (sessionOptions: { session?: ClientSession }) => Promise<T>): Promise<T> {
+  static async withSession<T>(
+    callback: (sessionOptions: { session?: ClientSession }) => Promise<T>,
+  ): Promise<T> {
     return callback(this.getSessionOptions());
   }
 
@@ -469,7 +479,7 @@ export class DB {
   static async beginTransaction(): Promise<UnifiedTransaction> {
     const dbType = getDbType();
 
-    if (dbType === 'mysql') {
+    if (dbType === "mysql") {
       const pool = getPool();
       const connection = await pool.getConnection();
       await connection.beginTransaction();
@@ -506,9 +516,9 @@ export class DB {
   static async commit(): Promise<void> {
     const dbType = getDbType();
 
-    if (dbType === 'mysql') {
+    if (dbType === "mysql") {
       if (!this.currentMysqlTransaction) {
-        throw new Error('No active MySQL transaction to commit');
+        throw new Error("No active MySQL transaction to commit");
       }
       await this.currentMysqlTransaction.commit();
       this.currentMysqlTransaction.release();
@@ -516,7 +526,7 @@ export class DB {
       this.transactionLevel--;
     } else {
       if (!this.currentMongoTransaction) {
-        throw new Error('No active MongoDB transaction to commit');
+        throw new Error("No active MongoDB transaction to commit");
       }
       await this.currentMongoTransaction.commit();
       this.currentMongoTransaction.endSession();
@@ -531,9 +541,9 @@ export class DB {
   static async rollback(): Promise<void> {
     const dbType = getDbType();
 
-    if (dbType === 'mysql') {
+    if (dbType === "mysql") {
       if (!this.currentMysqlTransaction) {
-        throw new Error('No active MySQL transaction to rollback');
+        throw new Error("No active MySQL transaction to rollback");
       }
       await this.currentMysqlTransaction.rollback();
       this.currentMysqlTransaction.release();
@@ -541,7 +551,7 @@ export class DB {
       this.transactionLevel--;
     } else {
       if (!this.currentMongoTransaction) {
-        throw new Error('No active MongoDB transaction to rollback');
+        throw new Error("No active MongoDB transaction to rollback");
       }
       await this.currentMongoTransaction.rollback();
       this.currentMongoTransaction.endSession();
@@ -561,7 +571,9 @@ export class DB {
    *   await Invoice.create({ user_id: 1, amount: 100 });
    * });
    */
-  static async transaction<T>(callback: UnifiedTransactionCallback<T> | (() => Promise<T>)): Promise<T> {
+  static async transaction<T>(
+    callback: UnifiedTransactionCallback<T> | (() => Promise<T>),
+  ): Promise<T> {
     const trx = await this.beginTransaction();
 
     try {
@@ -578,11 +590,11 @@ export class DB {
    * Execute a callback within a MySQL transaction (type-safe)
    */
   static async mysqlTransaction<T>(callback: MysqlTransactionCallback<T>): Promise<T> {
-    if (getDbType() !== 'mysql') {
-      throw new Error('mysqlTransaction() is only supported for MySQL');
+    if (getDbType() !== "mysql") {
+      throw new Error("mysqlTransaction() is only supported for MySQL");
     }
 
-    const trx = await this.beginTransaction() as Transaction;
+    const trx = (await this.beginTransaction()) as Transaction;
 
     try {
       const result = await callback(trx);
@@ -598,11 +610,11 @@ export class DB {
    * Execute a callback within a MongoDB transaction (type-safe)
    */
   static async mongoTransaction<T>(callback: MongoTransactionCallback<T>): Promise<T> {
-    if (getDbType() !== 'mongodb') {
-      throw new Error('mongoTransaction() is only supported for MongoDB');
+    if (getDbType() !== "mongodb") {
+      throw new Error("mongoTransaction() is only supported for MongoDB");
     }
 
-    const trx = await this.beginTransaction() as MongoTransaction;
+    const trx = (await this.beginTransaction()) as MongoTransaction;
 
     try {
       const result = await callback(trx);
@@ -636,7 +648,7 @@ export class DB {
    * Get the current active transaction (if any)
    */
   static getCurrentTransaction(): UnifiedTransaction | null {
-    if (getDbType() === 'mysql') {
+    if (getDbType() === "mysql") {
       return this.currentMysqlTransaction;
     }
     return this.currentMongoTransaction;
@@ -701,7 +713,7 @@ export class DB {
   /**
    * Get the database type (mysql or mongodb)
    */
-  static getType(): 'mysql' | 'mongodb' {
+  static getType(): "mysql" | "mongodb" {
     return getDbType();
   }
 
@@ -709,22 +721,22 @@ export class DB {
    * Check if using MySQL
    */
   static isMysql(): boolean {
-    return getDbType() === 'mysql';
+    return getDbType() === "mysql";
   }
 
   /**
    * Check if using MongoDB
    */
   static isMongo(): boolean {
-    return getDbType() === 'mongodb';
+    return getDbType() === "mongodb";
   }
 
   /**
    * Get the underlying connection pool (MySQL only)
    */
   static getPool(): Pool {
-    if (getDbType() !== 'mysql') {
-      throw new Error('getPool() is only supported for MySQL');
+    if (getDbType() !== "mysql") {
+      throw new Error("getPool() is only supported for MySQL");
     }
     return getPool();
   }
@@ -733,8 +745,8 @@ export class DB {
    * Get the MongoDB database instance
    */
   static getMongoDb(): Db {
-    if (getDbType() !== 'mongodb') {
-      throw new Error('getMongoDb() is only supported for MongoDB');
+    if (getDbType() !== "mongodb") {
+      throw new Error("getMongoDb() is only supported for MongoDB");
     }
     return getMongoDb();
   }
@@ -754,10 +766,10 @@ export class DB {
    * Escape a value for safe use in queries (MySQL only)
    */
   static escape(value: any): string {
-    if (value === null) return 'NULL';
-    if (typeof value === 'number') return String(value);
-    if (typeof value === 'boolean') return value ? '1' : '0';
-    if (typeof value === 'string') {
+    if (value === null) return "NULL";
+    if (typeof value === "number") return String(value);
+    if (typeof value === "boolean") return value ? "1" : "0";
+    if (typeof value === "string") {
       return `'${value.replace(/'/g, "''")}'`;
     }
     return String(value);
@@ -767,17 +779,16 @@ export class DB {
    * Quote a table or column name (MySQL only)
    */
   static quoteName(name: string): string {
-    return `\`${name.replace(/`/g, '``')}\``;
+    return `\`${name.replace(/`/g, "``")}\``;
   }
 
   /**
    * Listen for query events (placeholder for query logging)
    */
   static listen(_callback: (query: { sql: string; bindings: any[]; time: number }) => void): void {
-    console.warn('DB.listen() is not yet implemented. Query logging coming soon.');
+    console.warn("DB.listen() is not yet implemented. Query logging coming soon.");
   }
 }
 
 // Default export
 export default DB;
-

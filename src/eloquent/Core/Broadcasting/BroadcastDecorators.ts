@@ -7,7 +7,7 @@
 |
 */
 
-import { Channel, PrivateChannel, PresenceChannel, PublicChannel } from './Channel';
+import { Channel, PrivateChannel, PresenceChannel, PublicChannel } from "./Channel";
 
 /**
  * Mark an event class as broadcastable.
@@ -21,34 +21,34 @@ import { Channel, PrivateChannel, PresenceChannel, PublicChannel } from './Chann
  * }
  */
 export function ShouldBroadcast(
-    channels?: string | string[] | (() => string | string[])
+  channels?: string | string[] | (() => string | string[]),
 ): ClassDecorator {
-    return function (target: Function) {
-        const originalBroadcastOn = target.prototype.broadcastOn;
+  return function (target: Function) {
+    const originalBroadcastOn = target.prototype.broadcastOn;
 
-        target.prototype.broadcastOn = function () {
-            if (channels) {
-                return typeof channels === 'function' ? channels.call(this) : channels;
-            }
-            if (originalBroadcastOn) {
-                return originalBroadcastOn.call(this);
-            }
-            return [];
-        };
-
-        // Mark as broadcastable
-
-        (target as any).__shouldBroadcast = true;
+    target.prototype.broadcastOn = function () {
+      if (channels) {
+        return typeof channels === "function" ? channels.call(this) : channels;
+      }
+      if (originalBroadcastOn) {
+        return originalBroadcastOn.call(this);
+      }
+      return [];
     };
+
+    // Mark as broadcastable
+
+    (target as any).__shouldBroadcast = true;
+  };
 }
 
 /**
  * Mark an event to broadcast only to others (exclude sender).
  */
 export function BroadcastToOthers(): ClassDecorator {
-    return function (target: Function) {
-        (target as any).__broadcastToOthers = true;
-    };
+  return function (target: Function) {
+    (target as any).__broadcastToOthers = true;
+  };
 }
 
 /**
@@ -60,11 +60,11 @@ export function BroadcastToOthers(): ClassDecorator {
  * export class MessageSentEvent extends Event {}
  */
 export function BroadcastAs(name: string): ClassDecorator {
-    return function (target: Function) {
-        target.prototype.broadcastAs = function () {
-            return name;
-        };
+  return function (target: Function) {
+    target.prototype.broadcastAs = function () {
+      return name;
     };
+  };
 }
 
 /**
@@ -75,14 +75,12 @@ export function BroadcastAs(name: string): ClassDecorator {
  * @BroadcastWhen((event) => event.user.notificationsEnabled)
  * export class NotificationEvent extends Event {}
  */
-export function BroadcastWhen(
-    condition: (event: any) => boolean
-): ClassDecorator {
-    return function (target: Function) {
-        target.prototype.broadcastWhen = function () {
-            return condition(this);
-        };
+export function BroadcastWhen(condition: (event: any) => boolean): ClassDecorator {
+  return function (target: Function) {
+    target.prototype.broadcastWhen = function () {
+      return condition(this);
     };
+  };
 }
 
 /**
@@ -93,27 +91,24 @@ export function BroadcastWhen(
  * @BroadcastWith((event) => ({ messageId: event.message.id, content: event.message.content }))
  * export class MessageSentEvent extends Event {}
  */
-export function BroadcastWith(
-    dataFn: (event: any) => Record<string, any>
-): ClassDecorator {
-    return function (target: Function) {
-        target.prototype.broadcastWith = function () {
-            return dataFn(this);
-        };
+export function BroadcastWith(dataFn: (event: any) => Record<string, any>): ClassDecorator {
+  return function (target: Function) {
+    target.prototype.broadcastWith = function () {
+      return dataFn(this);
     };
+  };
 }
 
 /**
  * Helper to check if a class is marked as broadcastable.
  */
 export function isBroadcastable(target: any): boolean {
-    return target?.__shouldBroadcast === true || target?.constructor?.__shouldBroadcast === true;
+  return target?.__shouldBroadcast === true || target?.constructor?.__shouldBroadcast === true;
 }
 
 /**
  * Helper to check if broadcast should exclude sender.
  */
 export function shouldBroadcastToOthers(target: any): boolean {
-    return target?.__broadcastToOthers === true || target?.constructor?.__broadcastToOthers === true;
+  return target?.__broadcastToOthers === true || target?.constructor?.__broadcastToOthers === true;
 }
-

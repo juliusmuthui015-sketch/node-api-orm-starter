@@ -1,5 +1,5 @@
 // Add cache for accessors/mutators
-import { Model } from '@/eloquent/Model';
+import { Model } from "@/eloquent/Model";
 
 export interface AccessorDescriptor {
   name: string;

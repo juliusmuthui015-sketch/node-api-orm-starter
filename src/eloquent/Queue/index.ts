@@ -8,14 +8,23 @@
 */
 
 // Types
-export * from './types';
+export * from "./types";
 
 // Core classes
-export { Job, Queueable, dispatch, registerJob, getJobClass, getRegisteredJobs, PendingDispatch } from './Job';
-export { Queue, QueueManager } from './Queue';
-export { Worker } from './Worker';
-export { Schedule, ScheduledTaskBuilder, scheduler } from './Scheduler';
+export {
+  Job,
+  Queueable,
+  dispatch,
+  registerJob,
+  getJobClass,
+  getRegisteredJobs,
+  PendingDispatch,
+  encryptPayload,
+  decryptPayload,
+} from "./Job";
+export { Queue, QueueManager } from "./Queue";
+export { Worker } from "./Worker";
+export { Schedule, ScheduledTaskBuilder, scheduler } from "./Scheduler";
 
 // Drivers
-export { SyncDriver, DatabaseDriver, RedisDriver } from './Drivers';
-
+export { SyncDriver, DatabaseDriver, RedisDriver } from "./Drivers";

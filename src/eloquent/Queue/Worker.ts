@@ -1,414 +1,401 @@
-import { Queue } from './Queue';
-import { Job } from './Job';
-import { SerializedJob, WorkerOptions, JobStatus } from './types';
-import queueConfig from '@/config/queue.config';
-import { EventEmitter } from 'events';
+import { Queue } from "./Queue";
+import { Job } from "./Job";
+import { SerializedJob, WorkerOptions } from "./types";
+import queueConfig from "@/config/queue.config";
+import { Cache } from "@/cache";
+import { EventEmitter } from "events";
 
 /*
 |--------------------------------------------------------------------------
 | Queue Worker
 |--------------------------------------------------------------------------
 |
-| This class processes jobs from the queue. It can run as a daemon
-| or process a single job at a time.
+| Processes jobs from the queue. Supports daemon mode and single-run mode.
+| Handles retries, backoff, maxExceptions, retryUntil, maintenance mode,
+| and graceful restart via cache signal.
 |
 */
 
+// Guard so signal handlers are only registered once across all Worker instances
+let signalsRegistered = false;
+
 export class Worker extends EventEmitter {
-    private running: boolean = false;
-    private paused: boolean = false;
-    private shouldQuit: boolean = false;
-    private jobsProcessed: number = 0;
-    private startTime: number = 0;
-    private currentJob: SerializedJob | null = null;
+  private running: boolean = false;
+  private paused: boolean = false;
+  private shouldQuit: boolean = false;
+  private jobsProcessed: number = 0;
+  private startTime: number = 0;
+  private currentJob: SerializedJob | null = null;
 
-    private connectionName: string;
-    private queues: string[];
-    private options: Required<WorkerOptions>;
+  private connectionName: string;
+  private queues: string[];
+  private options: Required<WorkerOptions>;
 
-    constructor(
-        connectionName?: string,
-        queues: string | string[] = 'default',
-        options: WorkerOptions = {}
-    ) {
-        super();
+  private readonly restartKey: string;
 
-        this.connectionName = connectionName || queueConfig.default;
-        this.queues = Array.isArray(queues) ? queues : [queues];
+  constructor(
+    connectionName?: string,
+    queues: string | string[] = "default",
+    options: WorkerOptions = {},
+  ) {
+    super();
 
-        this.options = {
-            connection: this.connectionName,
-            queue: queues,
-            delay: options.delay ?? 0,
-            memory: options.memory ?? 128,
-            timeout: options.timeout ?? queueConfig.defaults.timeout,
-            sleep: options.sleep ?? 3,
-            maxTries: options.maxTries ?? queueConfig.defaults.tries,
-            maxJobs: options.maxJobs ?? 0,
-            maxTime: options.maxTime ?? 0,
-            force: options.force ?? false,
-            stopWhenEmpty: options.stopWhenEmpty ?? false,
-            rest: options.rest ?? 0,
-            verbose: options.verbose ?? false,
-        };
-    }
+    this.connectionName = connectionName || queueConfig.default;
+    this.queues = Array.isArray(queues) ? queues : [queues];
+    this.restartKey = `${process.env.APP_NAME || "app"}:queue:restart`;
 
-    /*
-    |--------------------------------------------------------------------------
-    | Worker Lifecycle
-    |--------------------------------------------------------------------------
-    */
+    this.options = {
+      connection: this.connectionName,
+      queue: queues,
+      delay: options.delay ?? 0,
+      memory: options.memory ?? 128,
+      timeout: options.timeout ?? queueConfig.defaults.timeout,
+      sleep: options.sleep ?? 3,
+      maxTries: options.maxTries ?? queueConfig.defaults.tries,
+      maxJobs: options.maxJobs ?? 0,
+      maxTime: options.maxTime ?? 0,
+      force: options.force ?? false,
+      stopWhenEmpty: options.stopWhenEmpty ?? false,
+      rest: options.rest ?? 0,
+      verbose: options.verbose ?? false,
+    };
+  }
 
-    /**
-     * Start the worker daemon.
-     */
-    async daemon(): Promise<void> {
-        if (this.running) {
-            return;
-        }
+  /*
+  |--------------------------------------------------------------------------
+  | Worker Lifecycle
+  |--------------------------------------------------------------------------
+  */
 
-        this.running = true;
-        this.shouldQuit = false;
-        this.startTime = Date.now();
-        this.jobsProcessed = 0;
+  async daemon(): Promise<void> {
+    if (this.running) return;
 
-        console.log(`[Worker] Starting on connection [${this.connectionName}] processing queues: ${this.queues.join(', ')}`);
-        this.emit('worker:start', { connection: this.connectionName, queues: this.queues });
+    this.running = true;
+    this.shouldQuit = false;
+    this.startTime = Date.now();
+    this.jobsProcessed = 0;
 
-        this.registerSignalHandlers();
+    console.log(
+      `[Worker] Starting on connection [${this.connectionName}] processing queues: ${this.queues.join(", ")}`,
+    );
+    this.emit("worker:start", { connection: this.connectionName, queues: this.queues });
 
-        while (this.running && !this.shouldQuit) {
-            if (this.paused) {
-                await this.sleep(this.options.sleep * 1000);
-                continue;
-            }
+    this.registerSignalHandlers();
 
-            // Check memory limit
-            if (this.memoryExceeded()) {
-                console.log('[Worker] Memory limit exceeded, stopping...');
-                this.stop();
-                break;
-            }
+    while (this.running && !this.shouldQuit) {
+      if (this.paused) {
+        await this.sleep(this.options.sleep * 1000);
+        continue;
+      }
 
-            // Check max jobs
-            if (this.options.maxJobs > 0 && this.jobsProcessed >= this.options.maxJobs) {
-                console.log(`[Worker] Max jobs (${this.options.maxJobs}) reached, stopping...`);
-                this.stop();
-                break;
-            }
-
-            // Check max time
-            if (this.options.maxTime > 0) {
-                const elapsed = (Date.now() - this.startTime) / 1000;
-                if (elapsed >= this.options.maxTime) {
-                    console.log(`[Worker] Max time (${this.options.maxTime}s) reached, stopping...`);
-                    this.stop();
-                    break;
-                }
-            }
-
-            // Process the next job
-            const job = await this.getNextJob();
-
-            if (job) {
-                await this.process(job);
-                this.jobsProcessed++;
-
-                if (this.options.rest > 0) {
-                    await this.sleep(this.options.rest * 1000);
-                }
-            } else {
-                if (this.options.stopWhenEmpty) {
-                    console.log('[Worker] Queue is empty, stopping...');
-                    this.stop();
-                    break;
-                }
-                await this.sleep(this.options.sleep * 1000);
-            }
-        }
-
-        this.emit('worker:stop', {
-            connection: this.connectionName,
-            jobsProcessed: this.jobsProcessed,
-            runtime: (Date.now() - this.startTime) / 1000,
-        });
-
-        console.log(`[Worker] Stopped. Processed ${this.jobsProcessed} jobs.`);
-    }
-
-    /**
-     * Process a single job and stop.
-     */
-    async runNextJob(): Promise<boolean> {
-        const job = await this.getNextJob();
-
-        if (!job) {
-            return false;
-        }
-
-        await this.process(job);
-        return true;
-    }
-
-    /**
-     * Stop the worker.
-     */
-    stop(): void {
-        this.shouldQuit = true;
-        this.running = false;
-    }
-
-    /**
-     * Pause the worker.
-     */
-    pause(): void {
-        this.paused = true;
-        this.emit('worker:pause');
-    }
-
-    /**
-     * Resume the worker.
-     */
-    resume(): void {
-        this.paused = false;
-        this.emit('worker:resume');
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Job Processing
-    |--------------------------------------------------------------------------
-    */
-
-    /**
-     * Get the next job from the queues.
-     */
-    private async getNextJob(): Promise<SerializedJob | null> {
-        // Process queues in priority order
-        for (const queue of this.queues) {
-            try {
-                if (this.options.verbose) {
-                    console.log(`[Worker] Polling queue [${queue}] on connection [${this.connectionName}]...`);
-                }
-                const job = await Queue.pop(queue, this.connectionName);
-                if (job) {
-                    return job;
-                }
-            } catch (error) {
-                console.error(`[Worker] Error popping job from queue [${queue}]:`, error);
-            }
-        }
+      // Maintenance mode: pause unless force flag is set
+      if (!this.options.force && (await this.isInMaintenanceMode())) {
         if (this.options.verbose) {
-            console.log(`[Worker] No jobs found, sleeping for ${this.options.sleep}s...`);
+          console.log("[Worker] Application in maintenance mode, sleeping...");
         }
-        return null;
+        await this.sleep(this.options.sleep * 1000);
+        continue;
+      }
+
+      if (this.memoryExceeded()) {
+        console.log("[Worker] Memory limit exceeded, stopping...");
+        this.stop();
+        break;
+      }
+
+      if (this.options.maxJobs > 0 && this.jobsProcessed >= this.options.maxJobs) {
+        console.log(`[Worker] Max jobs (${this.options.maxJobs}) reached, stopping...`);
+        this.stop();
+        break;
+      }
+
+      if (this.options.maxTime > 0) {
+        const elapsed = (Date.now() - this.startTime) / 1000;
+        if (elapsed >= this.options.maxTime) {
+          console.log(`[Worker] Max time (${this.options.maxTime}s) reached, stopping...`);
+          this.stop();
+          break;
+        }
+      }
+
+      // Check for restart signal from cache (set by queue:restart command)
+      if (await this.shouldRestart()) {
+        console.log("[Worker] Restart signal detected, stopping...");
+        this.stop();
+        break;
+      }
+
+      const job = await this.getNextJob();
+
+      if (job) {
+        await this.process(job);
+        this.jobsProcessed++;
+
+        if (this.options.rest > 0) {
+          await this.sleep(this.options.rest * 1000);
+        }
+      } else {
+        if (this.options.stopWhenEmpty) {
+          console.log("[Worker] Queue is empty, stopping...");
+          this.stop();
+          break;
+        }
+        await this.sleep(this.options.sleep * 1000);
+      }
     }
 
-    /**
-     * Process a job.
-     */
-    private async process(serializedJob: SerializedJob): Promise<void> {
-        this.currentJob = serializedJob;
+    this.emit("worker:stop", {
+      connection: this.connectionName,
+      jobsProcessed: this.jobsProcessed,
+      runtime: (Date.now() - this.startTime) / 1000,
+    });
 
-        this.emit('job:processing', {
-            connectionName: this.connectionName,
-            job: serializedJob
-        });
+    console.log(`[Worker] Stopped. Processed ${this.jobsProcessed} jobs.`);
+  }
 
-        console.log(`[Worker] Processing job: ${serializedJob.displayName} (${serializedJob.uuid})`);
+  async runNextJob(): Promise<boolean> {
+    const job = await this.getNextJob();
+    if (!job) return false;
+    await this.process(job);
+    return true;
+  }
 
+  stop(): void {
+    this.shouldQuit = true;
+    this.running = false;
+  }
+
+  pause(): void {
+    this.paused = true;
+    this.emit("worker:pause");
+  }
+
+  resume(): void {
+    this.paused = false;
+    this.emit("worker:resume");
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Job Processing
+  |--------------------------------------------------------------------------
+  */
+
+  private async getNextJob(): Promise<SerializedJob | null> {
+    for (const queue of this.queues) {
+      try {
+        if (this.options.verbose) {
+          console.log(
+            `[Worker] Polling queue [${queue}] on connection [${this.connectionName}]...`,
+          );
+        }
+        const job = await Queue.pop(queue, this.connectionName);
+        if (job) return job;
+      } catch (error) {
+        console.error(`[Worker] Error popping job from queue [${queue}]:`, error);
+      }
+    }
+    if (this.options.verbose) {
+      console.log(`[Worker] No jobs found, sleeping for ${this.options.sleep}s...`);
+    }
+    return null;
+  }
+
+  private async process(serializedJob: SerializedJob): Promise<void> {
+    this.currentJob = serializedJob;
+
+    this.emit("job:processing", { connectionName: this.connectionName, job: serializedJob });
+    console.log(`[Worker] Processing job: ${serializedJob.displayName} (${serializedJob.uuid})`);
+
+    try {
+      const job = Job.deserialize(serializedJob);
+
+      if (!job) {
+        throw new Error(`Failed to deserialize job: ${serializedJob.job}`);
+      }
+
+      const timeoutMs = (serializedJob.timeout || this.options.timeout) * 1000;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("Job timed out")), timeoutMs);
+      });
+
+      await Promise.race([job.handle(), timeoutPromise]);
+
+      await this.handleSuccess(serializedJob);
+    } catch (error) {
+      await this.handleFailure(serializedJob, error as Error);
+    } finally {
+      this.currentJob = null;
+    }
+  }
+
+  private async handleSuccess(job: SerializedJob): Promise<void> {
+    const driver = Queue.connection(this.connectionName);
+    await driver.delete(job, job.queue);
+
+    // Release unique lock so another job with same uniqueId can be dispatched
+    await Queue.releaseUniqueLock(job);
+
+    this.emit("job:processed", { connectionName: this.connectionName, job });
+    console.log(`[Worker] Job completed: ${job.displayName} (${job.uuid})`);
+  }
+
+  private async handleFailure(job: SerializedJob, error: Error): Promise<void> {
+    console.error(`[Worker] Job failed: ${job.displayName} (${job.uuid}) — ${error.message}`);
+
+    this.emit("job:exception", { connectionName: this.connectionName, job, exception: error });
+
+    // Increment exception count and persist it into the in-memory job object
+    // so it is included in the payload when the job is released back to the queue.
+    job.exceptionCount = (job.exceptionCount ?? 0) + 1;
+
+    const maxTries = job.maxTries || this.options.maxTries;
+    const maxExceptions = job.maxExceptions ?? queueConfig.defaults.maxExceptions;
+    const retryUntilExpired = job.retryUntil != null && Date.now() > job.retryUntil;
+
+    const shouldFailPermanently =
+      retryUntilExpired ||
+      job.attempts >= maxTries ||
+      job.exceptionCount >= maxExceptions;
+
+    const driver = Queue.connection(this.connectionName);
+
+    if (!shouldFailPermanently) {
+      const delay = this.calculateBackoff(job);
+
+      console.log(
+        `[Worker] Releasing job for retry — attempt ${job.attempts}/${maxTries}, ` +
+          `exceptions ${job.exceptionCount}/${maxExceptions}, delay ${delay}s`,
+      );
+
+      await driver.release(job, delay, job.queue);
+    } else {
+      const reason = retryUntilExpired
+        ? "retryUntil deadline passed"
+        : job.exceptionCount >= maxExceptions
+          ? `maxExceptions (${maxExceptions}) reached`
+          : `maxTries (${maxTries}) reached`;
+
+      console.log(`[Worker] Job failed permanently after ${job.attempts} attempt(s): ${reason}`);
+
+      await driver.delete(job, job.queue);
+      await Queue.logFailed(this.connectionName, job.queue, job, error);
+
+      // Release unique lock on permanent failure too
+      await Queue.releaseUniqueLock(job);
+
+      const jobInstance = Job.deserialize(job);
+      if (jobInstance) {
         try {
-            // Deserialize and execute the job
-            const job = Job.deserialize(serializedJob);
-
-            if (!job) {
-                throw new Error(`Failed to deserialize job: ${serializedJob.job}`);
-            }
-
-            // Create a timeout promise
-            const timeoutMs = (serializedJob.timeout || this.options.timeout) * 1000;
-            const timeoutPromise = new Promise<never>((_, reject) => {
-                setTimeout(() => reject(new Error('Job timed out')), timeoutMs);
-            });
-
-            // Race between job execution and timeout
-            await Promise.race([
-                job.handle(),
-                timeoutPromise,
-            ]);
-
-            // Job completed successfully
-            await this.handleSuccess(serializedJob);
-
-        } catch (error) {
-            await this.handleFailure(serializedJob, error as Error);
-        } finally {
-            this.currentJob = null;
+          jobInstance.failed(error);
+        } catch (e) {
+          console.error("[Worker] Error in job.failed():", e);
         }
+      }
+
+      this.emit("job:failed", { connectionName: this.connectionName, job, exception: error });
+    }
+  }
+
+  private calculateBackoff(job: SerializedJob): number {
+    const backoff = job.backoff || queueConfig.defaults.backoff;
+
+    if (typeof backoff === "number") return backoff;
+
+    if (Array.isArray(backoff)) {
+      const index = Math.min(job.attempts - 1, backoff.length - 1);
+      return backoff[Math.max(0, index)];
     }
 
-    /**
-     * Handle a successful job.
-     */
-    private async handleSuccess(job: SerializedJob): Promise<void> {
-        // Delete the job from the queue
-        const driver = Queue.connection(this.connectionName);
-        await driver.delete(job, job.queue);
+    return 0;
+  }
 
-        this.emit('job:processed', {
-            connectionName: this.connectionName,
-            job
-        });
+  /*
+  |--------------------------------------------------------------------------
+  | Utilities
+  |--------------------------------------------------------------------------
+  */
 
-        console.log(`[Worker] Job completed: ${job.displayName} (${job.uuid})`);
+  private memoryExceeded(): boolean {
+    const used = process.memoryUsage().heapUsed / 1024 / 1024;
+    return used >= this.options.memory;
+  }
+
+  private async isInMaintenanceMode(): Promise<boolean> {
+    try {
+      return await Cache.has(`${process.env.APP_NAME || "app"}:maintenance`);
+    } catch {
+      return false;
     }
+  }
 
-    /**
-     * Handle a failed job.
-     */
-    private async handleFailure(job: SerializedJob, error: Error): Promise<void> {
-        console.error(`[Worker] Job failed: ${job.displayName} (${job.uuid})`, error.message);
-
-        this.emit('job:exception', {
-            connectionName: this.connectionName,
-            job,
-            exception: error
-        });
-
-        const maxTries = job.maxTries || this.options.maxTries;
-        const driver = Queue.connection(this.connectionName);
-
-        // Check if we should retry
-        if (job.attempts < maxTries) {
-            // Calculate backoff delay
-            const delay = this.calculateBackoff(job);
-
-            console.log(`[Worker] Releasing job for retry (attempt ${job.attempts}/${maxTries}) in ${delay}s`);
-
-            await driver.release(job, delay, job.queue);
-        } else {
-            // Max attempts reached, mark as failed
-            console.log(`[Worker] Job failed permanently after ${job.attempts} attempts`);
-
-            // Delete from queue
-            await driver.delete(job, job.queue);
-
-            // Log to failed jobs
-            await Queue.logFailed(this.connectionName, job.queue, job, error);
-
-            // Call the job's failed method
-            const jobInstance = Job.deserialize(job);
-            if (jobInstance) {
-                try {
-                    jobInstance.failed(error);
-                } catch (e) {
-                    console.error('[Worker] Error in job.failed():', e);
-                }
-            }
-
-            this.emit('job:failed', {
-                connectionName: this.connectionName,
-                job,
-                exception: error
-            });
-        }
+  private async shouldRestart(): Promise<boolean> {
+    try {
+      const restartTs = await Cache.get(this.restartKey);
+      return restartTs != null && Number(restartTs) > this.startTime;
+    } catch {
+      return false;
     }
+  }
 
-    /**
-     * Calculate the backoff delay for a job.
-     */
-    private calculateBackoff(job: SerializedJob): number {
-        const backoff = job.backoff || queueConfig.defaults.backoff;
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
-        if (typeof backoff === 'number') {
-            return backoff;
-        }
+  private registerSignalHandlers(): void {
+    if (signalsRegistered) return;
+    signalsRegistered = true;
 
-        if (Array.isArray(backoff)) {
-            const index = Math.min(job.attempts - 1, backoff.length - 1);
-            return backoff[index];
-        }
-
-        return 0;
+    const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGQUIT"];
+    for (const signal of signals) {
+      process.on(signal, () => {
+        console.log(`\n[Worker] Received ${signal}, stopping gracefully...`);
+        this.stop();
+      });
     }
+  }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Utilities
-    |--------------------------------------------------------------------------
-    */
+  /*
+  |--------------------------------------------------------------------------
+  | Status
+  |--------------------------------------------------------------------------
+  */
 
-    /**
-     * Check if memory limit is exceeded.
-     */
-    private memoryExceeded(): boolean {
-        const used = process.memoryUsage().heapUsed / 1024 / 1024;
-        return used >= this.options.memory;
-    }
+  isRunning(): boolean {
+    return this.running;
+  }
 
-    /**
-     * Sleep for the given milliseconds.
-     */
-    private sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
+  isPaused(): boolean {
+    return this.paused;
+  }
 
-    /**
-     * Register signal handlers for graceful shutdown.
-     */
-    private registerSignalHandlers(): void {
-        const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGQUIT'];
+  getJobsProcessed(): number {
+    return this.jobsProcessed;
+  }
 
-        for (const signal of signals) {
-            process.on(signal, () => {
-                console.log(`\n[Worker] Received ${signal}, stopping gracefully...`);
-                this.stop();
-            });
-        }
-    }
+  getCurrentJob(): SerializedJob | null {
+    return this.currentJob;
+  }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Status
-    |--------------------------------------------------------------------------
-    */
+  getRuntime(): number {
+    return this.startTime > 0 ? (Date.now() - this.startTime) / 1000 : 0;
+  }
 
-    isRunning(): boolean {
-        return this.running;
-    }
-
-    isPaused(): boolean {
-        return this.paused;
-    }
-
-    getJobsProcessed(): number {
-        return this.jobsProcessed;
-    }
-
-    getCurrentJob(): SerializedJob | null {
-        return this.currentJob;
-    }
-
-    getRuntime(): number {
-        return this.startTime > 0 ? (Date.now() - this.startTime) / 1000 : 0;
-    }
-
-    getStatus(): {
-        running: boolean;
-        paused: boolean;
-        jobsProcessed: number;
-        runtime: number;
-        currentJob: SerializedJob | null;
-        memory: number;
-    } {
-        return {
-            running: this.running,
-            paused: this.paused,
-            jobsProcessed: this.jobsProcessed,
-            runtime: this.getRuntime(),
-            currentJob: this.currentJob,
-            memory: process.memoryUsage().heapUsed / 1024 / 1024,
-        };
-    }
+  getStatus(): {
+    running: boolean;
+    paused: boolean;
+    jobsProcessed: number;
+    runtime: number;
+    currentJob: SerializedJob | null;
+    memory: number;
+  } {
+    return {
+      running: this.running,
+      paused: this.paused,
+      jobsProcessed: this.jobsProcessed,
+      runtime: this.getRuntime(),
+      currentJob: this.currentJob,
+      memory: process.memoryUsage().heapUsed / 1024 / 1024,
+    };
+  }
 }
-

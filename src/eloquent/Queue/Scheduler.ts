@@ -1,825 +1,649 @@
-import { EventEmitter } from 'events';
-import parser from 'cron-parser';
-import {Event as EloquentEvent, Listener, ListensTo, getEventDispatcher} from '@/eloquent/Core/Events';
-import { Cache } from '@/cache';
+import { EventEmitter } from "events";
+import parser from "cron-parser";
+import {
+  Event as EloquentEvent,
+  Listener,
+  ListensTo,
+  getEventDispatcher,
+} from "@/eloquent/Core/Events";
+import { Cache } from "@/cache";
 
 /*
 |--------------------------------------------------------------------------
 | Distributed Lock Helpers
 |--------------------------------------------------------------------------
-|
-| Used by onOneServer / withoutOverlapping to ensure only one
-| instance of a scheduled task runs across all servers sharing
-| the same cache (Redis / DB).
-|
 */
 
-const SCHEDULER_LOCK_PREFIX = `${process.env.APP_NAME || 'app'}:scheduler:lock`;
+const SCHEDULER_LOCK_PREFIX = `${process.env.APP_NAME || "app"}:scheduler:lock`;
 
 async function acquireLock(key: string, ttlSeconds: number): Promise<boolean> {
-    const lockKey = `${SCHEDULER_LOCK_PREFIX}:${key}`;
-    const existing = await Cache.get(lockKey);
-    if (existing) return false; // lock held by another instance
-    await Cache.set(lockKey, Date.now(), ttlSeconds);
-    return true;
+  const lockKey = `${SCHEDULER_LOCK_PREFIX}:${key}`;
+  const existing = await Cache.get(lockKey);
+  if (existing) return false;
+  await Cache.set(lockKey, Date.now(), ttlSeconds);
+  return true;
 }
 
 async function releaseLock(key: string): Promise<void> {
-    const lockKey = `${SCHEDULER_LOCK_PREFIX}:${key}`;
-    await Cache.del(lockKey);
+  await Cache.del(`${SCHEDULER_LOCK_PREFIX}:${key}`);
 }
 
 /*
 |--------------------------------------------------------------------------
-| Task Scheduler
+| ScheduledTask Interface
 |--------------------------------------------------------------------------
-|
-| This class provides Laravel-like task scheduling functionality
-| using cron expressions.
-|
 */
 
 export interface ScheduledTask {
-    name: string;
-    callback: () => Promise<void> | void;
-    expression: string;
-    timezone?: string;
-    description?: string;
-    withoutOverlapping: boolean;
-    onOneServer: boolean;
-    evenInMaintenanceMode: boolean;
-    runInBackground: boolean;
-    lastRun?: Date;
-    nextRun?: Date;
-    isRunning: boolean;
+  name: string;
+  callback: () => Promise<void> | void;
+  expression: string;
+  timezone?: string;
+  description?: string;
+  withoutOverlapping: boolean;
+  onOneServer: boolean;
+  evenInMaintenanceMode: boolean;
+  runInBackground: boolean;
+  conditions: Array<() => boolean | Promise<boolean>>;
+  skipConditions: Array<() => boolean | Promise<boolean>>;
+  betweenStart?: string; // "HH:MM"
+  betweenEnd?: string;   // "HH:MM"
+  onSuccessHook?: (task: ScheduledTask) => void;
+  onFailureHook?: (task: ScheduledTask, error: Error) => void;
+  lastRun?: Date;
+  nextRun?: Date;
+  isRunning: boolean;
 }
-
 
 export function createObservableTask(task: ScheduledTask): ScheduledTask {
-    return new Proxy(task, {
-        set(target, prop, value) {
-            if (prop === 'expression' && target.expression !== value) {
-                target.expression = value;
-                // Calculate nextRun synchronously when expression changes
-                try {
-                    const interval = parser.parse(value, {
-                        tz: target.timezone || 'UTC',
-                    });
-                    target.nextRun = interval.next().toDate();
-                } catch (e) {
-                    // Invalid cron expression, leave nextRun undefined
-                }
-
-                // 🔥 fire event
-                new TaskExpressionChangedEvent(target).dispatchNow();
-
-
-                return true;
-            }
-
-            (target as any)[prop] = value;
-            return true;
-        }
-    });
-}
-export class Schedule {
-    private tasks: ScheduledTask[] = [];
-    private running: boolean = false;
-    private events: EventEmitter = new EventEmitter();
-
-    /*
-    |--------------------------------------------------------------------------
-    | Task Definition Methods
-    |--------------------------------------------------------------------------
-    */
-
-    /**
-     * Add a new scheduled task.
-     */
-    call(callback: () => Promise<void> | void): ScheduledTaskBuilder {
-        const task: ScheduledTask = createObservableTask({
-            name: `closure-${Date.now()}`,
-            callback,
-            expression: '* * * * *',
-            withoutOverlapping: false,
-            onOneServer: false,
-            evenInMaintenanceMode: false,
-            runInBackground: false,
-            isRunning: false,
-        });
-
-        this.tasks.push(task);
-        return new ScheduledTaskBuilder(task);
-    }
-
-    /**
-     * Schedule an artisan command.
-     */
-    command(command: string, args: string[] = []): ScheduledTaskBuilder {
-        const callback = async () => {
-            const { exec } = await import('child_process');
-            const { promisify } = await import('util');
-            const execAsync = promisify(exec);
-
-            const fullCommand = `npm run artisan -- ${command} ${args.join(' ')}`;
-            console.log(`[Scheduler] Running command: ${fullCommand}`);
-
-            try {
-                const { stdout, stderr } = await execAsync(fullCommand);
-                if (stdout) console.log(stdout);
-                if (stderr) console.error(stderr);
-            } catch (error) {
-                console.error(`[Scheduler] Command failed:`, error);
-                throw error;
-            }
-        };
-
-        const task: ScheduledTask = createObservableTask({
-            name: `command:${command}`,
-            callback,
-            expression: '* * * * *',
-            description: `Artisan command: ${command}`,
-            withoutOverlapping: false,
-            onOneServer: false,
-            evenInMaintenanceMode: false,
-            runInBackground: false,
-            isRunning: false,
-        });
-
-        this.tasks.push(task);
-        return new ScheduledTaskBuilder(task);
-    }
-
-    updateNextTaskRun(task: ScheduledTask) {
-        const interval = parser.parse(task.expression, {
-            tz: task.timezone || 'UTC',
-        });
-
-        task.nextRun = interval.next().toDate();
-    }
-
-    /**
-     * Schedule a shell command.
-     */
-    exec(command: string): ScheduledTaskBuilder {
-        const callback = async () => {
-            const { exec } = await import('child_process');
-            const { promisify } = await import('util');
-            const execAsync = promisify(exec);
-
-            console.log(`[Scheduler] Executing: ${command}`);
-
-            try {
-                const { stdout, stderr } = await execAsync(command);
-                if (stdout) console.log(stdout);
-                if (stderr) console.error(stderr);
-            } catch (error) {
-                console.error(`[Scheduler] Execution failed:`, error);
-                throw error;
-            }
-        };
-
-        const task: ScheduledTask = createObservableTask({
-            name: `exec:${command.slice(0, 50)}`,
-            callback,
-            expression: '* * * * *',
-            description: `Shell command: ${command}`,
-            withoutOverlapping: false,
-            onOneServer: false,
-            evenInMaintenanceMode: false,
-            runInBackground: false,
-            isRunning: false,
-        });
-
-        this.tasks.push(task);
-        return new ScheduledTaskBuilder(task);
-    }
-
-    /**
-     * Schedule a job to be dispatched.
-     */
-    job<T extends { dispatch: () => { dispatch: () => Promise<string> } }>(
-        JobClass: T,
-        queue?: string
-    ): ScheduledTaskBuilder {
-        const callback = async () => {
-            const pending = JobClass.dispatch();
-            if (queue) {
-                (pending as any).onQueue(queue);
-            }
-            await pending.dispatch();
-        };
-
-        const task: ScheduledTask = createObservableTask({
-            name: `job:${(JobClass as any).name || 'anonymous'}`,
-            callback,
-            expression: '* * * * *',
-            description: `Dispatch job: ${(JobClass as any).name}`,
-            withoutOverlapping: false,
-            onOneServer: false,
-            evenInMaintenanceMode: false,
-            runInBackground: false,
-            isRunning: false,
-        });
-
-        this.tasks.push(task);
-        return new ScheduledTaskBuilder(task);
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Scheduler Execution
-    |--------------------------------------------------------------------------
-    */
-
-    /**
-     * Get all scheduled tasks.
-     */
-    getTasks(): ScheduledTask[] {
-        return this.tasks;
-    }
-
-    /**
-     * Get tasks that are due to run.
-     */
-    getDueTasks(): ScheduledTask[] {
-        const now = new Date();
-        return this.tasks.filter(task => this.isDue(task, now));
-    }
-
-    /**
-     * Check if a task is due to run.
-     */
-    private isDue(task: ScheduledTask, now: Date = new Date()): boolean {
-        return this.matchesCronExpression(task.expression, now);
-    }
-
-    /**
-     * Match a cron expression against a date.
-     */
-    private matchesCronExpression(expression: string, date: Date): boolean {
-        const parts = expression.split(' ');
-        if (parts.length !== 5) {
-            console.warn(`[Scheduler] Invalid cron expression: ${expression}`);
-            return false;
-        }
-
-        const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
-
-        return (
-            this.matchCronPart(minute, date.getMinutes()) &&
-            this.matchCronPart(hour, date.getHours()) &&
-            this.matchCronPart(dayOfMonth, date.getDate()) &&
-            this.matchCronPart(month, date.getMonth() + 1) &&
-            this.matchCronPart(dayOfWeek, date.getDay())
-        );
-    }
-
-    /**
-     * Match a single cron part.
-     */
-    private matchCronPart(pattern: string, value: number): boolean {
-        if (pattern === '*') return true;
-
-        // Handle */n (every n)
-        if (pattern.startsWith('*/')) {
-            const interval = parseInt(pattern.slice(2), 10);
-            return value % interval === 0;
-        }
-
-        // Handle ranges (e.g., 1-5)
-        if (pattern.includes('-')) {
-            const [start, end] = pattern.split('-').map(n => parseInt(n, 10));
-            return value >= start && value <= end;
-        }
-
-        // Handle lists (e.g., 1,3,5)
-        if (pattern.includes(',')) {
-            const values = pattern.split(',').map(n => parseInt(n, 10));
-            return values.includes(value);
-        }
-
-        // Exact match
-        return parseInt(pattern, 10) === value;
-    }
-
-    /**
-     * Run the scheduler once (check and execute due tasks).
-     */
-    async runDueTasks(): Promise<void> {
-        const dueTasks = this.getDueTasks();
-
-        console.log(`[Scheduler] Found ${dueTasks.length} due task(s)`);
-
-        for (const task of dueTasks) {
-            // Skip if task is already running and withoutOverlapping is enabled
-            if (task.withoutOverlapping && task.isRunning) {
-                console.log(`[Scheduler] Skipping overlapping task (in-memory): ${task.name}`);
-                continue;
-            }
-
-            // Distributed withoutOverlapping check via cache lock
-            if (task.withoutOverlapping) {
-                const lockAcquired = await acquireLock(`overlap:${task.name}`, 300).catch(() => false);
-                if (!lockAcquired) {
-                    console.log(`[Scheduler] Skipping overlapping task (distributed lock): ${task.name}`);
-                    continue;
-                }
-            }
-
-            // Distributed onOneServer check via cache lock
-            if (task.onOneServer) {
-                // Lock for ~60 seconds (one cron tick) so only one server picks it up
-                const lockAcquired = await acquireLock(`once:${task.name}:${Math.floor(Date.now() / 60000)}`, 65).catch(() => false);
-                if (!lockAcquired) {
-                    console.log(`[Scheduler] Skipping task (onOneServer, another instance has it): ${task.name}`);
-                    continue;
-                }
-            }
-
-            await this.runTask(task);
-        }
-    }
-
-    /**
-     * Run a single task.
-     */
-    private async runTask(task: ScheduledTask): Promise<void> {
-        task.isRunning = true;
-        task.lastRun = new Date();
-        this.updateNextTaskRun(task)
-
-        console.log(`[Scheduler] Running task: ${task.name}`);
-        this.events.emit('task:start', task);
-
+  return new Proxy(task, {
+    set(target, prop, value) {
+      if (prop === "expression" && target.expression !== value) {
+        target.expression = value;
         try {
-            if (task.runInBackground) {
-                // Run in background without waiting
-                setImmediate(async () => {
-                    try {
-                        await task.callback();
-                        this.events.emit('task:success', task);
-                    } catch (error) {
-                        this.events.emit('task:failed', task, error);
-                    } finally {
-                        task.isRunning = false;
-                        if (task.withoutOverlapping) {
-                            await releaseLock(`overlap:${task.name}`).catch(() => {});
-                        }
-                    }
-                });
-            } else {
-                await task.callback();
-                this.events.emit('task:success', task);
-            }
-        } catch (error) {
+          const interval = parser.parse(value, { tz: target.timezone || "UTC" });
+          target.nextRun = interval.next().toDate();
+        } catch {
+          // invalid expression — leave nextRun as-is
+        }
+        new TaskExpressionChangedEvent(target).dispatchNow();
+        return true;
+      }
+      (target as any)[prop] = value;
+      return true;
+    },
+  });
+}
+
+/*
+|--------------------------------------------------------------------------
+| Schedule Manager
+|--------------------------------------------------------------------------
+*/
+
+export class Schedule {
+  private tasks: ScheduledTask[] = [];
+  private running: boolean = false;
+  private events: EventEmitter = new EventEmitter();
+
+  /*
+  |--------------------------------------------------------------------------
+  | Task Registration
+  |--------------------------------------------------------------------------
+  */
+
+  call(callback: () => Promise<void> | void): ScheduledTaskBuilder {
+    const task = createObservableTask(this.defaultTask(`closure-${Date.now()}`, callback));
+    this.tasks.push(task);
+    return new ScheduledTaskBuilder(task);
+  }
+
+  command(command: string, args: string[] = []): ScheduledTaskBuilder {
+    const callback = async () => {
+      const { exec } = await import("child_process");
+      const { promisify } = await import("util");
+      const execAsync = promisify(exec);
+      const fullCommand = `npm run artisan -- ${command} ${args.join(" ")}`;
+      console.log(`[Scheduler] Running command: ${fullCommand}`);
+      const { stdout, stderr } = await execAsync(fullCommand);
+      if (stdout) console.log(stdout);
+      if (stderr) console.error(stderr);
+    };
+    const task = createObservableTask(
+      this.defaultTask(`command:${command}`, callback, `Artisan command: ${command}`),
+    );
+    this.tasks.push(task);
+    return new ScheduledTaskBuilder(task);
+  }
+
+  exec(command: string): ScheduledTaskBuilder {
+    const callback = async () => {
+      const { exec } = await import("child_process");
+      const { promisify } = await import("util");
+      const execAsync = promisify(exec);
+      console.log(`[Scheduler] Executing: ${command}`);
+      const { stdout, stderr } = await execAsync(command);
+      if (stdout) console.log(stdout);
+      if (stderr) console.error(stderr);
+    };
+    const task = createObservableTask(
+      this.defaultTask(`exec:${command.slice(0, 50)}`, callback, `Shell command: ${command}`),
+    );
+    this.tasks.push(task);
+    return new ScheduledTaskBuilder(task);
+  }
+
+  job<T extends { dispatch: () => { dispatch: () => Promise<string> } }>(
+    JobClass: T,
+    queue?: string,
+  ): ScheduledTaskBuilder {
+    const callback = async () => {
+      const pending = JobClass.dispatch();
+      if (queue) (pending as any).onQueue(queue);
+      await pending.dispatch();
+    };
+    const task = createObservableTask(
+      this.defaultTask(
+        `job:${(JobClass as any).name || "anonymous"}`,
+        callback,
+        `Dispatch job: ${(JobClass as any).name}`,
+      ),
+    );
+    this.tasks.push(task);
+    return new ScheduledTaskBuilder(task);
+  }
+
+  private defaultTask(
+    name: string,
+    callback: () => Promise<void> | void,
+    description?: string,
+  ): ScheduledTask {
+    return {
+      name,
+      callback,
+      expression: "* * * * *",
+      description,
+      withoutOverlapping: false,
+      onOneServer: false,
+      evenInMaintenanceMode: false,
+      runInBackground: false,
+      conditions: [],
+      skipConditions: [],
+      isRunning: false,
+    };
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Execution
+  |--------------------------------------------------------------------------
+  */
+
+  updateNextTaskRun(task: ScheduledTask): void {
+    const interval = parser.parse(task.expression, { tz: task.timezone || "UTC" });
+    task.nextRun = interval.next().toDate();
+  }
+
+  getTasks(): ScheduledTask[] {
+    return this.tasks;
+  }
+
+  getDueTasks(): ScheduledTask[] {
+    const now = new Date();
+    return this.tasks.filter((task) => this.isDue(task, now));
+  }
+
+  private isDue(task: ScheduledTask, now: Date = new Date()): boolean {
+    if (!this.matchesCronExpression(task.expression, now)) return false;
+
+    // between() filter
+    if (task.betweenStart && task.betweenEnd) {
+      const [sh, sm] = task.betweenStart.split(":").map(Number);
+      const [eh, em] = task.betweenEnd.split(":").map(Number);
+      const current = now.getHours() * 60 + now.getMinutes();
+      const start = sh * 60 + sm;
+      const end = eh * 60 + em;
+      if (current < start || current > end) return false;
+    }
+
+    return true;
+  }
+
+  private matchesCronExpression(expression: string, date: Date): boolean {
+    const parts = expression.split(" ");
+    if (parts.length !== 5) {
+      console.warn(`[Scheduler] Invalid cron expression: ${expression}`);
+      return false;
+    }
+    const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+    return (
+      this.matchCronPart(minute, date.getMinutes()) &&
+      this.matchCronPart(hour, date.getHours()) &&
+      this.matchCronPart(dayOfMonth, date.getDate()) &&
+      this.matchCronPart(month, date.getMonth() + 1) &&
+      this.matchCronPart(dayOfWeek, date.getDay())
+    );
+  }
+
+  private matchCronPart(pattern: string, value: number): boolean {
+    if (pattern === "*") return true;
+    if (pattern.startsWith("*/")) {
+      const interval = parseInt(pattern.slice(2), 10);
+      return value % interval === 0;
+    }
+    if (pattern.includes("-")) {
+      const [start, end] = pattern.split("-").map(Number);
+      return value >= start && value <= end;
+    }
+    if (pattern.includes(",")) {
+      return pattern.split(",").map(Number).includes(value);
+    }
+    return parseInt(pattern, 10) === value;
+  }
+
+  async runDueTasks(): Promise<void> {
+    const maintenanceKey = `${process.env.APP_NAME || "app"}:maintenance`;
+    const inMaintenance = await Cache.has(maintenanceKey).catch(() => false);
+
+    const dueTasks = this.getDueTasks();
+    console.log(`[Scheduler] Found ${dueTasks.length} due task(s)`);
+
+    for (const task of dueTasks) {
+      // Maintenance mode gate
+      if (inMaintenance && !task.evenInMaintenanceMode) {
+        console.log(`[Scheduler] Skipping task in maintenance mode: ${task.name}`);
+        continue;
+      }
+
+      // Evaluate when() conditions — all must pass
+      if (task.conditions.length > 0) {
+        const results = await Promise.all(task.conditions.map((fn) => fn()));
+        if (!results.every(Boolean)) {
+          if (this.options.verbose) console.log(`[Scheduler] Skipping task (when() failed): ${task.name}`);
+          continue;
+        }
+      }
+
+      // Evaluate skip() conditions — any true → skip
+      if (task.skipConditions.length > 0) {
+        const results = await Promise.all(task.skipConditions.map((fn) => fn()));
+        if (results.some(Boolean)) {
+          if (this.options.verbose) console.log(`[Scheduler] Skipping task (skip() matched): ${task.name}`);
+          continue;
+        }
+      }
+
+      // In-process overlapping guard
+      if (task.withoutOverlapping && task.isRunning) {
+        console.log(`[Scheduler] Skipping overlapping task (in-memory): ${task.name}`);
+        continue;
+      }
+
+      // Distributed overlapping lock
+      if (task.withoutOverlapping) {
+        const lockAcquired = await acquireLock(`overlap:${task.name}`, 300).catch(() => false);
+        if (!lockAcquired) {
+          console.log(`[Scheduler] Skipping overlapping task (distributed lock): ${task.name}`);
+          continue;
+        }
+      }
+
+      // Single-server lock (one cron tick ≈ 60s + 5s buffer)
+      if (task.onOneServer) {
+        const lockAcquired = await acquireLock(
+          `once:${task.name}:${Math.floor(Date.now() / 60000)}`,
+          65,
+        ).catch(() => false);
+        if (!lockAcquired) {
+          console.log(`[Scheduler] Skipping task (onOneServer, another server has it): ${task.name}`);
+          continue;
+        }
+      }
+
+      await this.runTask(task);
+    }
+  }
+
+  private options = { verbose: false };
+
+  private async runTask(task: ScheduledTask): Promise<void> {
+    task.isRunning = true;
+    task.lastRun = new Date();
+    this.updateNextTaskRun(task);
+
+    console.log(`[Scheduler] Running task: ${task.name}`);
+    this.events.emit("task:start", task);
+
+    const finalize = async (error?: Error) => {
+      task.isRunning = false;
+      if (task.withoutOverlapping) {
+        await releaseLock(`overlap:${task.name}`).catch(() => {});
+      }
+      if (error) {
+        task.onFailureHook?.(task, error);
+      } else {
+        task.onSuccessHook?.(task);
+      }
+    };
+
+    try {
+      if (task.runInBackground) {
+        setImmediate(async () => {
+          try {
+            await task.callback();
+            this.events.emit("task:success", task);
+            await finalize();
+          } catch (error) {
             console.error(`[Scheduler] Task failed: ${task.name}`, error);
-            this.events.emit('task:failed', task, error);
-        } finally {
-            if (!task.runInBackground) {
-                task.isRunning = false;
-                if (task.withoutOverlapping) {
-                    await releaseLock(`overlap:${task.name}`).catch(() => {});
-                }
-            }
-        }
+            this.events.emit("task:failed", task, error);
+            await finalize(error as Error);
+          }
+        });
+        // For background tasks, don't hold isRunning — the setImmediate owns it
+      } else {
+        await task.callback();
+        this.events.emit("task:success", task);
+        await finalize();
+      }
+    } catch (error) {
+      console.error(`[Scheduler] Task failed: ${task.name}`, error);
+      this.events.emit("task:failed", task, error);
+      await finalize(error as Error);
+    }
+  }
+
+  async start(): Promise<void> {
+    if (this.running) {
+      console.log("[Scheduler] Already running");
+      return;
     }
 
-    /**
-     * Start the scheduler daemon (runs every minute).
-     */
-    async start(): Promise<void> {
-        if (this.running) {
-            console.log('[Scheduler] Already running');
-            return;
-        }
+    this.running = true;
+    console.log("[Scheduler] Starting scheduler daemon...");
 
-        this.running = true;
-        console.log('[Scheduler] Starting scheduler daemon...');
+    await this.runDueTasks();
 
-        // Run immediately, then every minute
-        await this.runDueTasks();
-
-        while (this.running) {
-            // Wait until the start of the next minute
-            const now = new Date();
-            const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
-
-            await this.sleep(msUntilNextMinute);
-
-            if (this.running) {
-                await this.runDueTasks();
-            }
-        }
+    while (this.running) {
+      const now = new Date();
+      const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+      await this.sleep(msUntilNextMinute);
+      if (this.running) await this.runDueTasks();
     }
+  }
 
-    /**
-     * Stop the scheduler daemon.
-     */
-    stop(): void {
-        this.running = false;
-        console.log('[Scheduler] Stopping scheduler daemon...');
-    }
+  stop(): void {
+    this.running = false;
+    console.log("[Scheduler] Stopping...");
+  }
 
-    /**
-     * Check if the scheduler is running.
-     */
-    isRunning(): boolean {
-        return this.running;
-    }
+  isRunning(): boolean {
+    return this.running;
+  }
 
-    /**
-     * Sleep utility.
-     */
-    private sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
+  on(
+    event: "task:start" | "task:success" | "task:failed",
+    listener: (task: ScheduledTask, error?: any) => void,
+  ): void {
+    this.events.on(event, listener);
+  }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Event Listeners
-    |--------------------------------------------------------------------------
-    */
-
-    on(event: 'task:start' | 'task:success' | 'task:failed', listener: (task: ScheduledTask, error?: any) => void): void {
-        this.events.on(event, listener);
-    }
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 }
 
 /*
 |--------------------------------------------------------------------------
 | Scheduled Task Builder
 |--------------------------------------------------------------------------
-|
-| Provides a fluent interface for configuring scheduled tasks.
-|
 */
 
-export class TaskExpressionChangedEvent extends EloquentEvent{
-    constructor(public readonly task: ScheduledTask) {
-        super();
-    }
-
-    eventName(): string {
-        return 'task:expression-changed';
-    }
+export class TaskExpressionChangedEvent extends EloquentEvent {
+  constructor(public readonly task: ScheduledTask) {
+    super();
+  }
+  eventName(): string {
+    return "task:expression-changed";
+  }
 }
 
-@ListensTo(['task:expression-changed'])
+@ListensTo(["task:expression-changed"])
 export class TaskExpressionChangedListener extends Listener {
-    handle(payload: TaskExpressionChangedEvent): void | Promise<void> {
-        const task = payload.task;
-
-        const interval = parser.parse(task.expression, {
-            tz: task.timezone || 'UTC',
-        });
-
-        task.nextRun = interval.next().toDate();
+  handle(payload: TaskExpressionChangedEvent): void | Promise<void> {
+    const task = payload.task;
+    try {
+      const interval = parser.parse(task.expression, { tz: task.timezone || "UTC" });
+      task.nextRun = interval.next().toDate();
+    } catch {
+      // invalid expression
     }
-
+  }
 }
 
 export class ScheduledTaskBuilder {
-    constructor(private task: ScheduledTask) {
-        // this.task = createObservableTask(this.task);
-    }
+  constructor(private task: ScheduledTask) {}
 
-    /*
-    |--------------------------------------------------------------------------
-    | Frequency Methods
-    |--------------------------------------------------------------------------
-    */
+  /*
+  |--------------------------------------------------------------------------
+  | Frequency — sub-hourly
+  |--------------------------------------------------------------------------
+  */
 
-    /**
-     * Set the cron expression.
-     */
-    cron(expression: string): this {
-        this.task.expression = expression;
-        return this;
-    }
+  everyMinute(): this { return this.cron("* * * * *"); }
+  everyTwoMinutes(): this { return this.cron("*/2 * * * *"); }
+  everyThreeMinutes(): this { return this.cron("*/3 * * * *"); }
+  everyFiveMinutes(): this { return this.cron("*/5 * * * *"); }
+  everyTenMinutes(): this { return this.cron("*/10 * * * *"); }
+  everyFifteenMinutes(): this { return this.cron("*/15 * * * *"); }
+  everyTwentyMinutes(): this { return this.cron("*/20 * * * *"); }
+  everyThirtyMinutes(): this { return this.cron("*/30 * * * *"); }
+  everyFortyFiveMinutes(): this { return this.cron("*/45 * * * *"); }
 
-    /**
-     * Run every minute.
-     */
-    everyMinute(): this {
-        this.task.expression = '* * * * *';
-        return this;
-    }
+  /** Run every N minutes (arbitrary interval). */
+  everyNMinutes(n: number): this { return this.cron(`*/${n} * * * *`); }
 
-    /**
-     * Run every two minutes.
-     */
-    everyTwoMinutes(): this {
-        this.task.expression = '*/2 * * * *';
-        return this;
-    }
+  /*
+  |--------------------------------------------------------------------------
+  | Frequency — hourly / daily / weekly / monthly / yearly
+  |--------------------------------------------------------------------------
+  */
 
-    /**
-     * Run every five minutes.
-     */
-    everyFiveMinutes(): this {
-        this.task.expression = '*/5 * * * *';
-        return this;
-    }
+  hourly(): this { return this.cron("0 * * * *"); }
+  hourlyAt(minute: number): this { return this.cron(`${minute} * * * *`); }
+  everyTwoHours(): this { return this.cron("0 */2 * * *"); }
+  everyFourHours(): this { return this.cron("0 */4 * * *"); }
+  everySixHours(): this { return this.cron("0 */6 * * *"); }
 
-    /**
-     * Run every ten minutes.
-     */
-    everyTenMinutes(): this {
-        this.task.expression = '*/10 * * * *';
-        return this;
-    }
+  /** Run every N hours (arbitrary interval). */
+  everyNHours(n: number): this { return this.cron(`0 */${n} * * *`); }
 
-    /**
-     * Run every fifteen minutes.
-     */
-    everyFifteenMinutes(): this {
-        this.task.expression = '*/15 * * * *';
-        return this;
-    }
+  daily(): this { return this.cron("0 0 * * *"); }
 
-    /**
-     * Run every thirty minutes.
-     */
-    everyThirtyMinutes(): this {
-        this.task.expression = '*/30 * * * *';
-        return this;
-    }
+  dailyAt(time: string): this {
+    const [hour, minute] = time.split(":").map(Number);
+    return this.cron(`${minute ?? 0} ${hour} * * *`);
+  }
 
-    /**
-     * Run hourly.
-     */
-    hourly(): this {
-        this.task.expression = '0 * * * *';
-        return this;
-    }
+  twiceDaily(firstHour: number = 1, secondHour: number = 13): this {
+    return this.cron(`0 ${firstHour},${secondHour} * * *`);
+  }
 
-    /**
-     * Run hourly at a specific minute.
-     */
-    hourlyAt(minute: number): this {
-        this.task.expression = `${minute} * * * *`;
-        return this;
-    }
+  twiceDailyAt(firstHour: number, firstMinute: number, secondHour: number, secondMinute: number): this {
+    return this.cron(`${firstMinute} ${firstHour},${secondHour} * * *`);
+  }
 
-    /**
-     * Run every two hours.
-     */
-    everyTwoHours(): this {
-        this.task.expression = '0 */2 * * *';
-        return this;
-    }
+  weekly(): this { return this.cron("0 0 * * 0"); }
 
-    /**
-     * Run every four hours.
-     */
-    everyFourHours(): this {
-        this.task.expression = '0 */4 * * *';
-        return this;
-    }
+  weeklyOn(dayOfWeek: number, time: string = "0:0"): this {
+    const [hour, minute] = time.split(":").map(Number);
+    return this.cron(`${minute ?? 0} ${hour} * * ${dayOfWeek}`);
+  }
 
-    /**
-     * Run every six hours.
-     */
-    everySixHours(): this {
-        this.task.expression = '0 */6 * * *';
-        return this;
-    }
+  monthly(): this { return this.cron("0 0 1 * *"); }
 
-    /**
-     * Run daily at midnight.
-     */
-    daily(): this {
-        this.task.expression = '0 0 * * *';
-        return this;
-    }
+  monthlyOn(day: number, time: string = "0:0"): this {
+    const [hour, minute] = time.split(":").map(Number);
+    return this.cron(`${minute ?? 0} ${hour} ${day} * *`);
+  }
 
-    /**
-     * Run daily at a specific time.
-     */
-    dailyAt(time: string): this {
-        const [hour, minute] = time.split(':').map(n => parseInt(n, 10));
-        this.task.expression = `${minute || 0} ${hour} * * *`;
-        return this;
-    }
+  /**
+   * Run on the last day of the month at midnight.
+   * Uses day 28 as a universally-safe proxy (real last-day check runs at runtime).
+   */
+  lastDayOfMonth(time: string = "0:0"): this {
+    const [hour, minute] = time.split(":").map(Number);
+    // Schedule on day 28 and let a when() condition handle the true last-day check
+    this.cron(`${minute ?? 0} ${hour} 28-31 * *`);
+    this.task.conditions.push(() => {
+      const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(now.getDate() + 1);
+      return tomorrow.getDate() === 1; // tomorrow is the 1st ⇒ today is the last day
+    });
+    return this;
+  }
 
-    /**
-     * Run twice daily.
-     */
-    twiceDaily(firstHour: number = 1, secondHour: number = 13): this {
-        this.task.expression = `0 ${firstHour},${secondHour} * * *`;
-        return this;
-    }
+  quarterly(): this { return this.cron("0 0 1 1,4,7,10 *"); }
+  yearly(): this { return this.cron("0 0 1 1 *"); }
+  yearlyOn(month: number, day: number = 1, time: string = "0:0"): this {
+    const [hour, minute] = time.split(":").map(Number);
+    return this.cron(`${minute ?? 0} ${hour} ${day} ${month} *`);
+  }
 
-    /**
-     * Run weekly on Sunday at midnight.
-     */
-    weekly(): this {
-        this.task.expression = '0 0 * * 0';
-        return this;
-    }
+  /*
+  |--------------------------------------------------------------------------
+  | Frequency — day-of-week shortcuts
+  |--------------------------------------------------------------------------
+  */
 
-    /**
-     * Run weekly on a specific day and time.
-     */
-    weeklyOn(dayOfWeek: number, time: string = '0:0'): this {
-        const [hour, minute] = time.split(':').map(n => parseInt(n, 10));
-        this.task.expression = `${minute || 0} ${hour} * * ${dayOfWeek}`;
-        return this;
-    }
+  weekdays(): this {
+    const parts = this.task.expression.split(" ");
+    parts[4] = "1-5";
+    return this.cron(parts.join(" "));
+  }
 
-    /**
-     * Run monthly on the first day at midnight.
-     */
-    monthly(): this {
-        this.task.expression = '0 0 1 * *';
-        return this;
-    }
+  weekends(): this {
+    const parts = this.task.expression.split(" ");
+    parts[4] = "0,6";
+    return this.cron(parts.join(" "));
+  }
 
-    /**
-     * Run monthly on a specific day and time.
-     */
-    monthlyOn(day: number, time: string = '0:0'): this {
-        const [hour, minute] = time.split(':').map(n => parseInt(n, 10));
-        this.task.expression = `${minute || 0} ${hour} ${day} * *`;
-        return this;
-    }
+  sundays(): this   { return this._setDow("0"); }
+  mondays(): this   { return this._setDow("1"); }
+  tuesdays(): this  { return this._setDow("2"); }
+  wednesdays(): this{ return this._setDow("3"); }
+  thursdays(): this { return this._setDow("4"); }
+  fridays(): this   { return this._setDow("5"); }
+  saturdays(): this { return this._setDow("6"); }
 
-    /**
-     * Run quarterly.
-     */
-    quarterly(): this {
-        this.task.expression = '0 0 1 1,4,7,10 *';
-        return this;
-    }
+  private _setDow(dow: string): this {
+    const parts = this.task.expression.split(" ");
+    parts[4] = dow;
+    return this.cron(parts.join(" "));
+  }
 
-    /**
-     * Run yearly.
-     */
-    yearly(): this {
-        this.task.expression = '0 0 1 1 *';
-        return this;
-    }
+  /*
+  |--------------------------------------------------------------------------
+  | Time window filter
+  |--------------------------------------------------------------------------
+  */
 
-    /**
-     * Run on weekdays only.
-     */
-    weekdays(): this {
-        const parts = this.task.expression.split(' ');
-        parts[4] = '1-5';
-        this.task.expression = parts.join(' ');
-        return this;
-    }
+  /**
+   * Only run the task if current time is between start and end (inclusive).
+   * @param start "HH:MM"
+   * @param end   "HH:MM"
+   */
+  between(start: string, end: string): this {
+    this.task.betweenStart = start;
+    this.task.betweenEnd = end;
+    return this;
+  }
 
-    /**
-     * Run on weekends only.
-     */
-    weekends(): this {
-        const parts = this.task.expression.split(' ');
-        parts[4] = '0,6';
-        this.task.expression = parts.join(' ');
-        return this;
-    }
+  /*
+  |--------------------------------------------------------------------------
+  | Conditions
+  |--------------------------------------------------------------------------
+  */
 
-    /**
-     * Run on Sundays.
-     */
-    sundays(): this {
-        const parts = this.task.expression.split(' ');
-        parts[4] = '0';
-        this.task.expression = parts.join(' ');
-        return this;
-    }
+  /** Only run when all provided callbacks return true. */
+  when(callback: () => boolean | Promise<boolean>): this {
+    this.task.conditions.push(callback);
+    return this;
+  }
 
-    /**
-     * Run on Mondays.
-     */
-    mondays(): this {
-        const parts = this.task.expression.split(' ');
-        parts[4] = '1';
-        this.task.expression = parts.join(' ');
-        return this;
-    }
+  /** Skip the task when callback returns true. */
+  skip(callback: () => boolean | Promise<boolean>): this {
+    this.task.skipConditions.push(callback);
+    return this;
+  }
 
-    /**
-     * Run on Tuesdays.
-     */
-    tuesdays(): this {
-        const parts = this.task.expression.split(' ');
-        parts[4] = '2';
-        this.task.expression = parts.join(' ');
-        return this;
-    }
+  /*
+  |--------------------------------------------------------------------------
+  | Configuration
+  |--------------------------------------------------------------------------
+  */
 
-    /**
-     * Run on Wednesdays.
-     */
-    wednesdays(): this {
-        const parts = this.task.expression.split(' ');
-        parts[4] = '3';
-        this.task.expression = parts.join(' ');
-        return this;
-    }
+  cron(expression: string): this {
+    this.task.expression = expression;
+    return this;
+  }
 
-    /**
-     * Run on Thursdays.
-     */
-    thursdays(): this {
-        const parts = this.task.expression.split(' ');
-        parts[4] = '4';
-        this.task.expression = parts.join(' ');
-        return this;
-    }
+  name(name: string): this {
+    this.task.name = name;
+    return this;
+  }
 
-    /**
-     * Run on Fridays.
-     */
-    fridays(): this {
-        const parts = this.task.expression.split(' ');
-        parts[4] = '5';
-        this.task.expression = parts.join(' ');
-        return this;
-    }
+  description(description: string): this {
+    this.task.description = description;
+    return this;
+  }
 
-    /**
-     * Run on Saturdays.
-     */
-    saturdays(): this {
-        const parts = this.task.expression.split(' ');
-        parts[4] = '6';
-        this.task.expression = parts.join(' ');
-        return this;
-    }
+  timezone(timezone: string): this {
+    this.task.timezone = timezone;
+    return this;
+  }
 
-    /*
-    |--------------------------------------------------------------------------
-    | Configuration Methods
-    |--------------------------------------------------------------------------
-    */
+  withoutOverlapping(): this {
+    this.task.withoutOverlapping = true;
+    return this;
+  }
 
-    /**
-     * Set the task name.
-     */
-    name(name: string): this {
-        this.task.name = name;
-        return this;
-    }
+  onOneServer(): this {
+    this.task.onOneServer = true;
+    return this;
+  }
 
-    /**
-     * Set the task description.
-     */
-    description(description: string): this {
-        this.task.description = description;
-        return this;
-    }
+  evenInMaintenanceMode(): this {
+    this.task.evenInMaintenanceMode = true;
+    return this;
+  }
 
-    /**
-     * Prevent task overlapping.
-     */
-    withoutOverlapping(): this {
-        this.task.withoutOverlapping = true;
-        return this;
-    }
+  runInBackground(): this {
+    this.task.runInBackground = true;
+    return this;
+  }
 
-    /**
-     * Run on one server only (for distributed systems).
-     */
-    onOneServer(): this {
-        this.task.onOneServer = true;
-        return this;
-    }
+  /*
+  |--------------------------------------------------------------------------
+  | Output / Lifecycle Hooks
+  |--------------------------------------------------------------------------
+  */
 
-    /**
-     * Run even in maintenance mode.
-     */
-    evenInMaintenanceMode(): this {
-        this.task.evenInMaintenanceMode = true;
-        return this;
-    }
+  onSuccess(callback: (task: ScheduledTask) => void): this {
+    this.task.onSuccessHook = callback;
+    return this;
+  }
 
-    /**
-     * Run in background.
-     */
-    runInBackground(): this {
-        this.task.runInBackground = true;
-        return this;
-    }
-
-    /**
-     * Set timezone.
-     */
-    timezone(timezone: string): this {
-        this.task.timezone = timezone;
-        return this;
-    }
+  onFailure(callback: (task: ScheduledTask, error: Error) => void): this {
+    this.task.onFailureHook = callback;
+    return this;
+  }
 }
 
-// Export a singleton instance
+// Singleton
 export const scheduler = new Schedule();
 
-// Register the TaskExpressionChangedListener immediately so it's available
-// before any tasks are created (decorators only register metadata, not the actual listener)
-getEventDispatcher().listen('task:expression-changed', (payload: TaskExpressionChangedEvent) => {
-    new TaskExpressionChangedListener().handle(payload);
+// Register event listener for expression changes
+getEventDispatcher().listen("task:expression-changed", (payload: TaskExpressionChangedEvent) => {
+  new TaskExpressionChangedListener().handle(payload);
 });
-

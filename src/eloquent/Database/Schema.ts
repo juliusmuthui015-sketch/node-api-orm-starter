@@ -11,7 +11,7 @@
 // });
 // // sql is a CREATE TABLE ... statement
 
-import { getDbType, getMongoDb } from '@/config/db.config';
+import { getDbType, getMongoDb } from "@/config/db.config";
 
 // Common interface to support both SQL and Mongo schema builders
 export interface MigrationSchema {
@@ -41,7 +41,9 @@ type DefaultValue = string | number | boolean | null | RawExpression;
 // Raw expression for default values like CURRENT_TIMESTAMP
 export class RawExpression {
   constructor(public value: string) {}
-  toString() { return this.value; }
+  toString() {
+    return this.value;
+  }
 }
 
 // Helper to create raw expressions
@@ -85,7 +87,7 @@ export class Column {
   // set enum values for ENUM columns
   enum(values: string[]) {
     this.enumValues = values.slice();
-    this.type = 'ENUM';
+    this.type = "ENUM";
     return this;
   }
 
@@ -206,30 +208,30 @@ export class Column {
   toSQL(omitName = false): string {
     let sqlType = this.type;
     if (this.enumValues && this.enumValues.length) {
-      const vals = this.enumValues.map((v) => `'${escapeSingle(v)}'`).join(',');
+      const vals = this.enumValues.map((v) => `'${escapeSingle(v)}'`).join(",");
       sqlType = `ENUM(${vals})`;
     } else if (
       this.length !== undefined &&
-      (this.type.toLowerCase() === 'varchar' || this.type.toLowerCase() === 'char')
+      (this.type.toLowerCase() === "varchar" || this.type.toLowerCase() === "char")
     ) {
       sqlType += `(${this.length})`;
-    } else if (this.length !== undefined && this.type.toLowerCase() === 'int') {
+    } else if (this.length !== undefined && this.type.toLowerCase() === "int") {
       sqlType += `(${this.length})`;
-    } else if (this.length !== undefined && this.type.toLowerCase() === 'decimal') {
+    } else if (this.length !== undefined && this.type.toLowerCase() === "decimal") {
       sqlType += `(${this.length},${this.decimalPlaces})`;
-    } else if (this.length !== undefined && this.type.toLowerCase() === 'float') {
+    } else if (this.length !== undefined && this.type.toLowerCase() === "float") {
       sqlType += `(${this.length},${this.decimalPlaces})`;
-    } else if (this.length !== undefined && this.type.toLowerCase() === 'double') {
+    } else if (this.length !== undefined && this.type.toLowerCase() === "double") {
       sqlType += `(${this.length},${this.decimalPlaces})`;
     }
 
-    if (this.unsignedFlag) sqlType += ' UNSIGNED';
+    if (this.unsignedFlag) sqlType += " UNSIGNED";
 
     // Character set and collation
     if (this.charset__) sqlType += ` CHARACTER SET ${this.charset__}`;
     if (this.collation) sqlType += ` COLLATE ${this.collation}`;
 
-    const namePart = omitName ? '' : `\`${this.name}\` `;
+    const namePart = omitName ? "" : `\`${this.name}\` `;
     let parts = [`${namePart}${sqlType}`.trim()];
 
     // Generated columns
@@ -241,32 +243,32 @@ export class Column {
       parts.push(`GENERATED ALWAYS AS (${this.generatedAs__}) STORED`);
     }
 
-    if (this.autoIncrementFlag) parts.push('AUTO_INCREMENT');
+    if (this.autoIncrementFlag) parts.push("AUTO_INCREMENT");
 
-    if (this.primaryFlag && !this.autoIncrementFlag) parts.push('PRIMARY KEY');
+    if (this.primaryFlag && !this.autoIncrementFlag) parts.push("PRIMARY KEY");
 
-    if (!this.nullableFlag) parts.push('NOT NULL');
-    else parts.push('NULL');
+    if (!this.nullableFlag) parts.push("NOT NULL");
+    else parts.push("NULL");
 
     if (this.defaultValue !== undefined) {
-      parts.push('DEFAULT ' + formatDefault(this.defaultValue));
+      parts.push("DEFAULT " + formatDefault(this.defaultValue));
     } else if (this.useCurrent__) {
-      parts.push('DEFAULT CURRENT_TIMESTAMP');
+      parts.push("DEFAULT CURRENT_TIMESTAMP");
     }
 
     if (this.useCurrentOnUpdate__) {
-      parts.push('ON UPDATE CURRENT_TIMESTAMP');
+      parts.push("ON UPDATE CURRENT_TIMESTAMP");
     }
 
-    if (this.invisibleFlag) parts.push('INVISIBLE');
+    if (this.invisibleFlag) parts.push("INVISIBLE");
 
     if (this.commentText) parts.push(`COMMENT '${escapeSingle(this.commentText)}'`);
 
     // Position modifiers (for ALTER TABLE)
-    if (this.firstFlag) parts.push('FIRST');
+    if (this.firstFlag) parts.push("FIRST");
     else if (this.afterColumn) parts.push(`AFTER \`${this.afterColumn}\``);
 
-    return parts.join(' ');
+    return parts.join(" ");
   }
 }
 
@@ -275,10 +277,10 @@ function escapeSingle(s: string) {
 }
 
 function formatDefault(v: DefaultValue) {
-  if (v === null) return 'NULL';
+  if (v === null) return "NULL";
   if (v instanceof RawExpression) return v.value;
-  if (typeof v === 'number') return String(v);
-  if (typeof v === 'boolean') return v ? '1' : '0';
+  if (typeof v === "number") return String(v);
+  if (typeof v === "boolean") return v ? "1" : "0";
   // assume string
   return `'${escapeSingle(String(v))}'`;
 }
@@ -288,8 +290,8 @@ export class TableBuilder {
   columns: Column[] = [];
   primaryKeys: string[] = [];
   uniques: string[] = [];
-  engine: string = 'InnoDB';
-  charset: string = 'utf8mb4';
+  engine: string = "InnoDB";
+  charset: string = "utf8mb4";
 
   // index & foreign key support
   indexes: { columns: string[]; name?: string; unique?: boolean }[] = [];
@@ -321,9 +323,9 @@ export class TableBuilder {
   changes: { oldName: string; col: Column }[] = [];
   renames: { from: string; to: string }[] = [];
 
-  mode: 'create' | 'alter' = 'create';
+  mode: "create" | "alter" = "create";
 
-  constructor(name: string, mode: 'create' | 'alter' = 'create') {
+  constructor(name: string, mode: "create" | "alter" = "create") {
     this.name = name;
     this.mode = mode;
   }
@@ -356,8 +358,8 @@ export class TableBuilder {
     const idx =
       this.foreignKeys.push({
         columns: pf.columns,
-        refTable: pf.refTable || '',
-        refColumns: pf.refColumns || ['id'],
+        refTable: pf.refTable || "",
+        refColumns: pf.refColumns || ["id"],
         name: pf.name,
         onDelete: pf.onDelete,
         onUpdate: pf.onUpdate,
@@ -370,22 +372,22 @@ export class TableBuilder {
 
   // enum helper
   enum(name: string, values: string[]) {
-    const c = this.column('ENUM', name);
+    const c = this.column("ENUM", name);
     c.enum(values);
     return c;
   }
 
   // Laravel: SET column type
   set(name: string, values: string[]) {
-    const c = this.column('SET', name);
+    const c = this.column("SET", name);
     c.enumValues = values.slice();
     return c;
   }
 
   // ==================== Primary Key Types ====================
 
-  increments(name = 'id') {
-    const c = this.column('INT', name);
+  increments(name = "id") {
+    const c = this.column("INT", name);
     c.increments();
     c.unsigned();
     this.primary(name);
@@ -393,8 +395,8 @@ export class TableBuilder {
   }
 
   // Laravel: Big auto-incrementing ID (BIGINT UNSIGNED)
-  bigIncrements(name = 'id') {
-    const c = this.column('BIGINT', name);
+  bigIncrements(name = "id") {
+    const c = this.column("BIGINT", name);
     c.increments();
     c.unsigned();
     this.primary(name);
@@ -402,8 +404,8 @@ export class TableBuilder {
   }
 
   // Laravel: Medium auto-incrementing ID (MEDIUMINT UNSIGNED)
-  mediumIncrements(name = 'id') {
-    const c = this.column('MEDIUMINT', name);
+  mediumIncrements(name = "id") {
+    const c = this.column("MEDIUMINT", name);
     c.increments();
     c.unsigned();
     this.primary(name);
@@ -411,8 +413,8 @@ export class TableBuilder {
   }
 
   // Laravel: Small auto-incrementing ID (SMALLINT UNSIGNED)
-  smallIncrements(name = 'id') {
-    const c = this.column('SMALLINT', name);
+  smallIncrements(name = "id") {
+    const c = this.column("SMALLINT", name);
     c.increments();
     c.unsigned();
     this.primary(name);
@@ -420,8 +422,8 @@ export class TableBuilder {
   }
 
   // Laravel: Tiny auto-incrementing ID (TINYINT UNSIGNED)
-  tinyIncrements(name = 'id') {
-    const c = this.column('TINYINT', name);
+  tinyIncrements(name = "id") {
+    const c = this.column("TINYINT", name);
     c.increments();
     c.unsigned();
     this.primary(name);
@@ -429,23 +431,23 @@ export class TableBuilder {
   }
 
   // Laravel: UUID primary key
-  uuid(name = 'id') {
-    return this.column('CHAR', name, 36);
+  uuid(name = "id") {
+    return this.column("CHAR", name, 36);
   }
 
   // Laravel: ULID primary key
-  ulid(name = 'id') {
-    return this.column('CHAR', name, 26);
+  ulid(name = "id") {
+    return this.column("CHAR", name, 26);
   }
 
   // Laravel: Auto-incrementing UUID-like ID
-  id(name = 'id') {
+  id(name = "id") {
     return this.bigIncrements(name);
   }
 
   // Laravel: foreignId - BIGINT UNSIGNED for foreign keys
   foreignId(name: string) {
-    const c = this.column('BIGINT', name);
+    const c = this.column("BIGINT", name);
     c.unsigned();
     return c;
   }
@@ -463,99 +465,99 @@ export class TableBuilder {
   // ==================== Integer Types ====================
 
   integer(name: string, length?: number) {
-    return this.column('INT', name, length);
+    return this.column("INT", name, length);
   }
 
   // Laravel: Unsigned integer
   unsignedInteger(name: string) {
-    const c = this.column('INT', name);
+    const c = this.column("INT", name);
     c.unsigned();
     return c;
   }
 
   tinyInteger(name: string) {
-    return this.column('TINYINT', name);
+    return this.column("TINYINT", name);
   }
 
   // Laravel: Unsigned tiny integer
   unsignedTinyInteger(name: string) {
-    const c = this.column('TINYINT', name);
+    const c = this.column("TINYINT", name);
     c.unsigned();
     return c;
   }
 
   // Laravel: Small integer
   smallInteger(name: string) {
-    return this.column('SMALLINT', name);
+    return this.column("SMALLINT", name);
   }
 
   // Laravel: Unsigned small integer
   unsignedSmallInteger(name: string) {
-    const c = this.column('SMALLINT', name);
+    const c = this.column("SMALLINT", name);
     c.unsigned();
     return c;
   }
 
   // Laravel: Medium integer
   mediumInteger(name: string) {
-    return this.column('MEDIUMINT', name);
+    return this.column("MEDIUMINT", name);
   }
 
   // Laravel: Unsigned medium integer
   unsignedMediumInteger(name: string) {
-    const c = this.column('MEDIUMINT', name);
+    const c = this.column("MEDIUMINT", name);
     c.unsigned();
     return c;
   }
 
   // Laravel: Big integer
   bigInteger(name: string) {
-    return this.column('BIGINT', name);
+    return this.column("BIGINT", name);
   }
 
   // Laravel: Unsigned big integer
   unsignedBigInteger(name: string) {
-    const c = this.column('BIGINT', name);
+    const c = this.column("BIGINT", name);
     c.unsigned();
     return c;
   }
 
   boolean(name: string) {
-    return this.column('TINYINT', name, 1);
+    return this.column("TINYINT", name, 1);
   }
 
   // ==================== String Types ====================
 
   string(name: string, length = 255) {
-    return this.column('VARCHAR', name, length);
+    return this.column("VARCHAR", name, length);
   }
 
   char(name: string, length = 255) {
-    return this.column('CHAR', name, length);
+    return this.column("CHAR", name, length);
   }
 
   text(name: string) {
-    return this.column('TEXT', name);
+    return this.column("TEXT", name);
   }
 
   // Laravel: Tiny text
   tinyText(name: string) {
-    return this.column('TINYTEXT', name);
+    return this.column("TINYTEXT", name);
   }
 
   // Laravel: Medium text
   mediumText(name: string) {
-    return this.column('MEDIUMTEXT', name);
+    return this.column("MEDIUMTEXT", name);
   }
 
   longText(name: string) {
-    return this.column('LONGTEXT', name);
+    return this.column("LONGTEXT", name);
   }
 
   // ==================== Numeric Types ====================
 
   decimal(name: string, precision: number = 8, scale: number = 2) {
-    const c = this.column('DECIMAL', name, precision);
+    const c = this.column("DECIMAL", name, precision);
     c.decimalPlaces = scale;
     return c;
   }
@@ -569,7 +571,7 @@ export class TableBuilder {
 
   // Laravel: Float column
   float(name: string, precision: number = 8, scale: number = 2) {
-    const c = this.column('FLOAT', name, precision);
+    const c = this.column("FLOAT", name, precision);
     c.decimalPlaces = scale;
     return c;
   }
@@ -583,7 +585,7 @@ export class TableBuilder {
 
   // Laravel: Double column
   double(name: string, precision?: number, scale?: number) {
-    const c = this.column('DOUBLE', name, precision);
+    const c = this.column("DOUBLE", name, precision);
     if (scale !== undefined) c.decimalPlaces = scale;
     return c;
   }
@@ -598,23 +600,23 @@ export class TableBuilder {
   // ==================== Date/Time Types ====================
 
   datetime(name: string, precision?: number) {
-    const type = precision !== undefined ? `DATETIME(${precision})` : 'DATETIME';
+    const type = precision !== undefined ? `DATETIME(${precision})` : "DATETIME";
     return this.column(type, name);
   }
 
   // Laravel: Date column
   date(name: string) {
-    return this.column('DATE', name);
+    return this.column("DATE", name);
   }
 
   // Laravel: Time column
   time(name: string, precision?: number) {
-    const type = precision !== undefined ? `TIME(${precision})` : 'TIME';
+    const type = precision !== undefined ? `TIME(${precision})` : "TIME";
     return this.column(type, name);
   }
 
   timestamp(name: string, precision?: number) {
-    const type = precision !== undefined ? `TIMESTAMP(${precision})` : 'TIMESTAMP';
+    const type = precision !== undefined ? `TIMESTAMP(${precision})` : "TIMESTAMP";
     const c = this.column(type, name);
     c.nullable();
     return c;
@@ -637,12 +639,12 @@ export class TableBuilder {
 
   // Laravel: Year column
   year(name: string) {
-    return this.column('YEAR', name);
+    return this.column("YEAR", name);
   }
 
   timestamps(precision?: number) {
-    this.timestamp('created_at', precision).nullable();
-    this.timestamp('updated_at', precision).nullable();
+    this.timestamp("created_at", precision).nullable();
+    this.timestamp("updated_at", precision).nullable();
     return this;
   }
 
@@ -656,13 +658,13 @@ export class TableBuilder {
     return this.timestamps(precision);
   }
 
-  softDeletes(column = 'deleted_at', precision?: number) {
+  softDeletes(column = "deleted_at", precision?: number) {
     this.timestamp(column, precision).nullable();
     return this;
   }
 
   // Laravel: Soft deletes with timezone
-  softDeletesTz(column = 'deleted_at', precision?: number) {
+  softDeletesTz(column = "deleted_at", precision?: number) {
     return this.softDeletes(column, precision);
   }
 
@@ -671,16 +673,16 @@ export class TableBuilder {
   // Laravel: Binary column
   binary(name: string, length?: number) {
     if (length) {
-      return this.column('VARBINARY', name, length);
+      return this.column("VARBINARY", name, length);
     }
-    return this.column('BLOB', name);
+    return this.column("BLOB", name);
   }
 
   // ==================== JSON Types ====================
 
   // JSON column helper (length accepted for API compatibility but ignored in SQL)
   json(name: string) {
-    return this.column('JSON', name);
+    return this.column("JSON", name);
   }
 
   // Laravel: JSONB column (alias for JSON in MySQL)
@@ -692,59 +694,59 @@ export class TableBuilder {
 
   // Laravel: Geometry column
   geometry(name: string) {
-    return this.column('GEOMETRY', name);
+    return this.column("GEOMETRY", name);
   }
 
   // Laravel: Point column
   point(name: string) {
-    return this.column('POINT', name);
+    return this.column("POINT", name);
   }
 
   // Laravel: Line string column
   lineString(name: string) {
-    return this.column('LINESTRING', name);
+    return this.column("LINESTRING", name);
   }
 
   // Laravel: Polygon column
   polygon(name: string) {
-    return this.column('POLYGON', name);
+    return this.column("POLYGON", name);
   }
 
   // Laravel: Geometry collection
   geometryCollection(name: string) {
-    return this.column('GEOMETRYCOLLECTION', name);
+    return this.column("GEOMETRYCOLLECTION", name);
   }
 
   // Laravel: Multi-point column
   multiPoint(name: string) {
-    return this.column('MULTIPOINT', name);
+    return this.column("MULTIPOINT", name);
   }
 
   // Laravel: Multi-line string column
   multiLineString(name: string) {
-    return this.column('MULTILINESTRING', name);
+    return this.column("MULTILINESTRING", name);
   }
 
   // Laravel: Multi-polygon column
   multiPolygon(name: string) {
-    return this.column('MULTIPOLYGON', name);
+    return this.column("MULTIPOLYGON", name);
   }
 
   // ==================== Special Types ====================
 
   // Laravel: IP address column (VARCHAR for compatibility)
-  ipAddress(name = 'ip_address') {
+  ipAddress(name = "ip_address") {
     return this.string(name, 45);
   }
 
   // Laravel: MAC address column
-  macAddress(name = 'mac_address') {
+  macAddress(name = "mac_address") {
     return this.string(name, 17);
   }
 
   // Laravel: Remember token column
   rememberToken() {
-    return this.string('remember_token', 100).nullable();
+    return this.string("remember_token", 100).nullable();
   }
 
   // Laravel: Morphs columns (type + id for polymorphic relations)
@@ -881,7 +883,7 @@ export class TableBuilder {
   // change column: provide old name and a callback that defines the new column
   changeColumn(oldName: string, cb: (col: Column) => Column) {
     // create a temporary column using the oldName as placeholder; callback can change name
-    const tmp = new Column(oldName, 'VARCHAR');
+    const tmp = new Column(oldName, "VARCHAR");
     const newCol = cb(tmp) || tmp;
     this.changes.push({ oldName, col: newCol });
     return this;
@@ -891,33 +893,33 @@ export class TableBuilder {
     const colSql = this.columns.map((c) => c.toSQL());
 
     const pk = this.primaryKeys.length
-      ? `, PRIMARY KEY (${this.primaryKeys.map((n) => `\`${n}\``).join(', ')})`
-      : '';
-    const uqs = this.uniques.map((n) => `, UNIQUE KEY (\`${n}\`)`).join('');
+      ? `, PRIMARY KEY (${this.primaryKeys.map((n) => `\`${n}\``).join(", ")})`
+      : "";
+    const uqs = this.uniques.map((n) => `, UNIQUE KEY (\`${n}\`)`).join("");
 
     // index and foreign key SQL for create mode
     const idxSqlCreate = this.indexes
       .map((ix) => {
         const name =
-          ix.name || `${this.name}_${ix.columns.join('_')}${ix.unique ? '_uniq' : '_idx'}`;
-        const cols = ix.columns.map((c) => `\`${c}\``).join(', ');
+          ix.name || `${this.name}_${ix.columns.join("_")}${ix.unique ? "_uniq" : "_idx"}`;
+        const cols = ix.columns.map((c) => `\`${c}\``).join(", ");
         return ix.unique ? `, UNIQUE KEY \`${name}\` (${cols})` : `, KEY \`${name}\` (${cols})`;
       })
-      .join('');
+      .join("");
 
     const fkSqlCreate = this.foreignKeys
       .map((fk) => {
-        const name = fk.name || `${this.name}_${fk.columns.join('_')}_fk`;
-        const cols = fk.columns.map((c) => `\`${c}\``).join(', ');
-        const refs = fk.refColumns.map((c) => `\`${c}\``).join(', ');
-        const onDelete = fk.onDelete ? ` ON DELETE ${fk.onDelete}` : '';
-        const onUpdate = fk.onUpdate ? ` ON UPDATE ${fk.onUpdate}` : '';
+        const name = fk.name || `${this.name}_${fk.columns.join("_")}_fk`;
+        const cols = fk.columns.map((c) => `\`${c}\``).join(", ");
+        const refs = fk.refColumns.map((c) => `\`${c}\``).join(", ");
+        const onDelete = fk.onDelete ? ` ON DELETE ${fk.onDelete}` : "";
+        const onUpdate = fk.onUpdate ? ` ON UPDATE ${fk.onUpdate}` : "";
         return `, CONSTRAINT \`${name}\` FOREIGN KEY (${cols}) REFERENCES \`${fk.refTable}\` (${refs})${onDelete}${onUpdate}`;
       })
-      .join('');
+      .join("");
 
-    if (this.mode === 'create') {
-      return `CREATE TABLE IF NOT EXISTS \`${this.name}\` (\n  ${colSql.join(',\n  ')}${pk}${uqs}${idxSqlCreate}${fkSqlCreate}\n) ENGINE=${this.engine} DEFAULT CHARSET=${this.charset};`;
+    if (this.mode === "create") {
+      return `CREATE TABLE IF NOT EXISTS \`${this.name}\` (\n  ${colSql.join(",\n  ")}${pk}${uqs}${idxSqlCreate}${fkSqlCreate}\n) ENGINE=${this.engine} DEFAULT CHARSET=${this.charset};`;
     }
 
     // alter mode: produce one or more ALTER TABLE statements
@@ -928,8 +930,8 @@ export class TableBuilder {
     }
     // indexes in alter mode
     for (const ix of this.indexes) {
-      const name = ix.name || `${this.name}_${ix.columns.join('_')}${ix.unique ? '_uniq' : '_idx'}`;
-      const cols = ix.columns.map((c) => `\`${c}\``).join(', ');
+      const name = ix.name || `${this.name}_${ix.columns.join("_")}${ix.unique ? "_uniq" : "_idx"}`;
+      const cols = ix.columns.map((c) => `\`${c}\``).join(", ");
       parts.push(
         ix.unique
           ? `ALTER TABLE \`${this.name}\` ADD UNIQUE \`${name}\` (${cols});`
@@ -944,11 +946,11 @@ export class TableBuilder {
 
     // foreign keys in alter mode
     for (const fk of this.foreignKeys) {
-      const name = fk.name || `${this.name}_${fk.columns.join('_')}_fk`;
-      const cols = fk.columns.map((c) => `\`${c}\``).join(', ');
-      const refs = fk.refColumns.map((c) => `\`${c}\``).join(', ');
-      const onDelete = fk.onDelete ? ` ON DELETE ${fk.onDelete}` : '';
-      const onUpdate = fk.onUpdate ? ` ON UPDATE ${fk.onUpdate}` : '';
+      const name = fk.name || `${this.name}_${fk.columns.join("_")}_fk`;
+      const cols = fk.columns.map((c) => `\`${c}\``).join(", ");
+      const refs = fk.refColumns.map((c) => `\`${c}\``).join(", ");
+      const onDelete = fk.onDelete ? ` ON DELETE ${fk.onDelete}` : "";
+      const onUpdate = fk.onUpdate ? ` ON UPDATE ${fk.onUpdate}` : "";
       parts.push(
         `ALTER TABLE \`${this.name}\` ADD CONSTRAINT \`${name}\` FOREIGN KEY (${cols}) REFERENCES \`${fk.refTable}\` (${refs})${onDelete}${onUpdate};`,
       );
@@ -974,7 +976,7 @@ export class TableBuilder {
       parts.push(`ALTER TABLE \`${this.name}\` CHANGE \`${ch.oldName}\` ${ch.col.toSQL()};`);
     }
 
-    return parts.join('\n');
+    return parts.join("\n");
   }
 }
 
@@ -986,13 +988,13 @@ export default class Schema implements MigrationSchema {
   }
 
   createTable(name: string, callback: (table: TableBuilder) => void) {
-    const tb = new TableBuilder(name, 'create');
+    const tb = new TableBuilder(name, "create");
     callback(tb);
     return tb.toSQL();
   }
 
   alterTable(name: string, callback: (table: TableBuilder) => void) {
-    const tb = new TableBuilder(name, 'alter');
+    const tb = new TableBuilder(name, "alter");
     callback(tb);
     return tb.toSQL();
   }
@@ -1013,7 +1015,7 @@ export default class Schema implements MigrationSchema {
     if (!this.queryFn) return false;
     const rows: any[] = await this.queryFn(
       `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
-      [name]
+      [name],
     );
     return rows && rows.length > 0;
   }
@@ -1022,7 +1024,7 @@ export default class Schema implements MigrationSchema {
     if (!this.queryFn) return false;
     const rows: any[] = await this.queryFn(
       `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
-      [table, column]
+      [table, column],
     );
     return rows && rows.length > 0;
   }
@@ -1038,7 +1040,7 @@ export default class Schema implements MigrationSchema {
     if (!this.queryFn) return null;
     const rows: any[] = await this.queryFn(
       `SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
-      [table, column]
+      [table, column],
     );
     return rows && rows[0] ? rows[0].DATA_TYPE : null;
   }
@@ -1047,13 +1049,13 @@ export default class Schema implements MigrationSchema {
     if (!this.queryFn) return [];
     const rows: any[] = await this.queryFn(
       `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION`,
-      [table]
+      [table],
     );
     return rows ? rows.map((r: any) => r.COLUMN_NAME) : [];
   }
 
   dropColumns(table: string, columns: string[]) {
-    const drops = columns.map(c => `DROP COLUMN \`${c}\``).join(', ');
+    const drops = columns.map((c) => `DROP COLUMN \`${c}\``).join(", ");
     return `ALTER TABLE \`${table}\` ${drops};`;
   }
 
@@ -1085,7 +1087,7 @@ export default class Schema implements MigrationSchema {
   async getAllTables(): Promise<string[]> {
     if (!this.queryFn) return [];
     const rows: any[] = await this.queryFn(
-      `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`
+      `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'`,
     );
     return rows ? rows.map((r: any) => r.TABLE_NAME) : [];
   }
@@ -1094,7 +1096,7 @@ export default class Schema implements MigrationSchema {
   async getAllViews(): Promise<string[]> {
     if (!this.queryFn) return [];
     const rows: any[] = await this.queryFn(
-      `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'VIEW'`
+      `SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'VIEW'`,
     );
     return rows ? rows.map((r: any) => r.TABLE_NAME) : [];
   }
@@ -1102,24 +1104,29 @@ export default class Schema implements MigrationSchema {
 
 // MongoSchema: records operations and applies them using MongoDB
 export class MongoSchema implements MigrationSchema {
-  private ops: Array<{ type: 'create' | 'alter' | 'drop' | 'rename'; table: string; tb?: TableBuilder; newName?: string }> = [];
+  private ops: Array<{
+    type: "create" | "alter" | "drop" | "rename";
+    table: string;
+    tb?: TableBuilder;
+    newName?: string;
+  }> = [];
 
   createTable(name: string, callback: (table: TableBuilder) => void) {
-    const tb = new TableBuilder(name, 'create');
+    const tb = new TableBuilder(name, "create");
     callback(tb);
-    this.ops.push({ type: 'create', table: name, tb });
+    this.ops.push({ type: "create", table: name, tb });
     return undefined as any; // runner will call apply()
   }
 
   alterTable(name: string, callback: (table: TableBuilder) => void) {
-    const tb = new TableBuilder(name, 'alter');
+    const tb = new TableBuilder(name, "alter");
     callback(tb);
-    this.ops.push({ type: 'alter', table: name, tb });
+    this.ops.push({ type: "alter", table: name, tb });
     return undefined as any;
   }
 
   dropTable(name: string) {
-    this.ops.push({ type: 'drop', table: name });
+    this.ops.push({ type: "drop", table: name });
     return undefined as any;
   }
 
@@ -1128,19 +1135,19 @@ export class MongoSchema implements MigrationSchema {
   }
 
   rename(from: string, to: string) {
-    this.ops.push({ type: 'rename', table: from, newName: to });
+    this.ops.push({ type: "rename", table: from, newName: to });
     return undefined as any;
   }
 
   async hasTable(name: string): Promise<boolean> {
-    if (getDbType() !== 'mongodb') return false;
+    if (getDbType() !== "mongodb") return false;
     const db = getMongoDb();
     return await db.listCollections({ name }).hasNext();
   }
 
   async hasColumn(table: string, column: string): Promise<boolean> {
     // In MongoDB, columns are dynamic - we check if any document has the field
-    if (getDbType() !== 'mongodb') return false;
+    if (getDbType() !== "mongodb") return false;
     const db = getMongoDb();
     const doc = await db.collection(table).findOne({ [column]: { $exists: true } });
     return !!doc;
@@ -1155,7 +1162,7 @@ export class MongoSchema implements MigrationSchema {
 
   async getColumnType(table: string, column: string): Promise<string | null> {
     // MongoDB is schemaless - return null or infer from first document
-    if (getDbType() !== 'mongodb') return null;
+    if (getDbType() !== "mongodb") return null;
     const db = getMongoDb();
     const doc = await db.collection(table).findOne({ [column]: { $exists: true } });
     if (!doc || doc[column] === undefined) return null;
@@ -1164,36 +1171,36 @@ export class MongoSchema implements MigrationSchema {
 
   async getColumnListing(table: string): Promise<string[]> {
     // Get all unique field names from the collection (limited sample)
-    if (getDbType() !== 'mongodb') return [];
+    if (getDbType() !== "mongodb") return [];
     const db = getMongoDb();
     const docs = await db.collection(table).find({}).limit(100).toArray();
     const fields = new Set<string>();
     for (const doc of docs) {
-      Object.keys(doc).forEach(k => fields.add(k));
+      Object.keys(doc).forEach((k) => fields.add(k));
     }
     return Array.from(fields);
   }
 
   dropColumns(table: string, columns: string[]) {
     // Queue an unset operation for apply()
-    const tb = new TableBuilder(table, 'alter');
-    columns.forEach(c => tb.dropColumn(c));
-    this.ops.push({ type: 'alter', table, tb });
+    const tb = new TableBuilder(table, "alter");
+    columns.forEach((c) => tb.dropColumn(c));
+    this.ops.push({ type: "alter", table, tb });
     return undefined as any;
   }
 
   renameColumn(table: string, from: string, to: string) {
-    const tb = new TableBuilder(table, 'alter');
+    const tb = new TableBuilder(table, "alter");
     tb.renameColumn(from, to);
-    this.ops.push({ type: 'alter', table, tb });
+    this.ops.push({ type: "alter", table, tb });
     return undefined as any;
   }
 
   async apply(): Promise<void> {
-    if (getDbType() !== 'mongodb') return;
+    if (getDbType() !== "mongodb") return;
     const db = getMongoDb();
     for (const op of this.ops) {
-      if (op.type === 'create' && op.tb) {
+      if (op.type === "create" && op.tb) {
         // create collection if not exists
         const exists = await db.listCollections({ name: op.table }).hasNext();
         if (!exists) {
@@ -1211,19 +1218,19 @@ export class MongoSchema implements MigrationSchema {
         // other indexes
         for (const ix of op.tb.indexes || []) {
           const name =
-            ix.name || `${op.table}_${ix.columns.join('_')}${ix.unique ? '_uniq' : '_idx'}`;
+            ix.name || `${op.table}_${ix.columns.join("_")}${ix.unique ? "_uniq" : "_idx"}`;
           const spec: any = {};
           ix.columns.forEach((col) => (spec[col] = 1));
           try {
             await c.createIndex(spec, { unique: Boolean(ix.unique), name });
           } catch (_) {}
         }
-      } else if (op.type === 'alter' && op.tb) {
+      } else if (op.type === "alter" && op.tb) {
         const c = db.collection(op.table);
         // add indexes
         for (const ix of op.tb.indexes || []) {
           const name =
-            ix.name || `${op.table}_${ix.columns.join('_')}${ix.unique ? '_uniq' : '_idx'}`;
+            ix.name || `${op.table}_${ix.columns.join("_")}${ix.unique ? "_uniq" : "_idx"}`;
           const spec: any = {};
           ix.columns.forEach((col) => (spec[col] = 1));
           try {
@@ -1239,7 +1246,7 @@ export class MongoSchema implements MigrationSchema {
         // drop columns (unset fields)
         if (op.tb.drops && op.tb.drops.length) {
           const unset: any = {};
-          op.tb.drops.forEach(d => unset[d] = '');
+          op.tb.drops.forEach((d) => (unset[d] = ""));
           try {
             await c.updateMany({}, { $unset: unset });
           } catch (_) {}
@@ -1252,11 +1259,11 @@ export class MongoSchema implements MigrationSchema {
             } catch (_) {}
           }
         }
-      } else if (op.type === 'drop') {
+      } else if (op.type === "drop") {
         try {
           await db.collection(op.table).drop();
         } catch (_) {}
-      } else if (op.type === 'rename' && op.newName) {
+      } else if (op.type === "rename" && op.newName) {
         try {
           await db.collection(op.table).rename(op.newName);
         } catch (_) {}

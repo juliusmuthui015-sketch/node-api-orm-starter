@@ -1,3 +1,2 @@
-export { QueueJob } from './QueueJob';
-export { FailedJob } from './FailedJob';
-
+export { QueueJob } from "./QueueJob";
+export { FailedJob } from "./FailedJob";

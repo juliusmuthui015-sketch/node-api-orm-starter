@@ -1,13 +1,13 @@
 // example-traits.ts - Example trait classes
-import { trait, scopeMethod, macroMethod } from './traits';
-import { Model } from '@/eloquent/Model';
-import { EloquentBuilder } from '@/eloquent/EloquentBuilder';
+import { trait, scopeMethod, macroMethod } from "./traits";
+import { Model } from "@/eloquent/Model";
+import { EloquentBuilder } from "@/eloquent/EloquentBuilder";
 
 /**
  * SoftDeletes trait as a class (Laravel style)
  * Usage: use SoftDeletes;
  */
-@trait('SoftDeletes')
+@trait("SoftDeletes")
 export class SoftDeletes {
   /**
    * Determine if the model has been soft-deleted
@@ -53,7 +53,7 @@ export class SoftDeletes {
  * Timestamps trait (auto-manages created_at and updated_at)
  * Usage: use Timestamps;
  */
-@trait('Timestamps')
+@trait("Timestamps")
 export class Timestamps {
   /**
    * Touch the model's timestamps
@@ -64,7 +64,7 @@ export class Timestamps {
 
     if (!(staticClass as any).timestamps) return;
 
-    model.setAttribute('updated_at', new Date());
+    model.setAttribute("updated_at", new Date());
     await model.save();
   }
 
@@ -93,7 +93,7 @@ export class Timestamps {
  * Sluggable trait for generating slugs
  * Usage: use Sluggable;
  */
-@trait('Sluggable')
+@trait("Sluggable")
 export class Sluggable {
   /**
    * Generate a slug from a given string
@@ -101,20 +101,20 @@ export class Sluggable {
   generateSlug(text: string): string {
     return text
       .toLowerCase()
-      .replace(/[^\w\s-]/g, '')
-      .replace(/\s+/g, '-')
-      .replace(/--+/g, '-')
+      .replace(/[^\w\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/--+/g, "-")
       .trim();
   }
 
   /**
    * Set slug from attribute
    */
-  setSlugFrom(sourceField: string = 'name'): void {
+  setSlugFrom(sourceField: string = "name"): void {
     const model = this as any as Model;
     const source = model.getAttribute(sourceField);
     if (source) {
-      model.setAttribute('slug', this.generateSlug(source));
+      model.setAttribute("slug", this.generateSlug(source));
     }
   }
 
@@ -123,7 +123,7 @@ export class Sluggable {
    */
   @scopeMethod()
   static scopeFindBySlug(builder: EloquentBuilder<any>, slug: string) {
-    return builder.where('slug', slug);
+    return builder.where("slug", slug);
   }
 
   static boot(modelClass: typeof Model): void {
@@ -161,20 +161,20 @@ export class Sluggable {
       (modelClass as any).eventListeners[eventName].push(handler as any);
     };
 
-    registerEvent('saving', (model: Model) => {
+    registerEvent("saving", (model: Model) => {
       const m: any = model as any;
-      const isDirtyName = typeof m.isDirty === 'function' ? m.isDirty('name') : true;
-      const slugVal = typeof m.getAttribute === 'function' ? m.getAttribute('slug') : m.slug;
+      const isDirtyName = typeof m.isDirty === "function" ? m.isDirty("name") : true;
+      const slugVal = typeof m.getAttribute === "function" ? m.getAttribute("slug") : m.slug;
       if (isDirtyName && !slugVal) {
-        if (typeof m.setSlugFrom === 'function') {
-          m.setSlugFrom('name');
+        if (typeof m.setSlugFrom === "function") {
+          m.setSlugFrom("name");
         } else if (m.name) {
           m.slug = String(m.name)
             .toLowerCase()
-            .replace(/\s+/g, '-')
-            .replace(/[^a-z0-9-]/g, '')
-            .replace(/-+/g, '-')
-            .replace(/^-|-$/g, '');
+            .replace(/\s+/g, "-")
+            .replace(/[^a-z0-9-]/g, "")
+            .replace(/-+/g, "-")
+            .replace(/^-|-$/g, "");
         }
       }
       return true;
@@ -186,7 +186,7 @@ export class Sluggable {
  * Sortable trait for ordering
  * Usage: use Sortable;
  */
-@trait('Sortable')
+@trait("Sortable")
 export class Sortable {
   /**
    * Reorder models
@@ -197,18 +197,18 @@ export class Sortable {
     for (let i = 0; i < ids.length; i++) {
       await self
         .query()
-        .where('id', ids[i])
+        .where("id", ids[i])
         .update({ order: i + 1 });
     }
   }
 
   @macroMethod()
   static latest(this: typeof Model) {
-    return this.query().orderBy('created_at', 'desc');
+    return this.query().orderBy("created_at", "desc");
   }
   @macroMethod()
   static oldest(this: typeof Model) {
-    return this.query().orderBy('created_at', 'asc');
+    return this.query().orderBy("created_at", "asc");
   }
 
   /**
@@ -218,13 +218,13 @@ export class Sortable {
     const model = this as any as Model;
     const m: any = model as any;
     const currentOrder: number =
-      typeof m.getAttribute === 'function' ? m.getAttribute('order') : m.order;
-    if (typeof currentOrder !== 'number') return;
+      typeof m.getAttribute === "function" ? m.getAttribute("order") : m.order;
+    if (typeof currentOrder !== "number") return;
     if (currentOrder > 1) {
       const self = m.constructor as typeof Model as any;
       const itemAbove = await self
         .query()
-        .where('order', currentOrder - 1)
+        .where("order", currentOrder - 1)
         .first();
 
       if (itemAbove) {
@@ -241,15 +241,15 @@ export class Sortable {
     const model = this as any as Model;
     const m: any = model as any;
     const currentOrder: number =
-      typeof m.getAttribute === 'function' ? m.getAttribute('order') : m.order;
-    if (typeof currentOrder !== 'number') return;
+      typeof m.getAttribute === "function" ? m.getAttribute("order") : m.order;
+    if (typeof currentOrder !== "number") return;
     const self = m.constructor as typeof Model as any;
-    const maxOrder = await self.query().max('order');
+    const maxOrder = await self.query().max("order");
 
-    if (typeof maxOrder === 'number' && currentOrder < maxOrder) {
+    if (typeof maxOrder === "number" && currentOrder < maxOrder) {
       const itemBelow = await self
         .query()
-        .where('order', currentOrder + 1)
+        .where("order", currentOrder + 1)
         .first();
 
       if (itemBelow) {
@@ -263,8 +263,8 @@ export class Sortable {
    * Scope: Order by order column
    */
   @scopeMethod()
-  static scopeOrdered(builder: EloquentBuilder<any>, direction: 'asc' | 'desc' = 'asc') {
-    return builder.orderBy('order', direction);
+  static scopeOrdered(builder: EloquentBuilder<any>, direction: "asc" | "desc" = "asc") {
+    return builder.orderBy("order", direction);
   }
 }
 
@@ -272,7 +272,7 @@ export class Sortable {
  * Searchable trait for full-text search
  * Usage: use Searchable;
  */
-@trait('Searchable')
+@trait("Searchable")
 export class Searchable {
   /**
    * Scope: Search in specified fields
@@ -281,14 +281,14 @@ export class Searchable {
   static scopeSearch(
     builder: EloquentBuilder<any>,
     query: string,
-    fields: string[] = ['name', 'description'],
+    fields: string[] = ["name", "description"],
   ) {
     if (query) {
       fields.forEach((field, index) => {
         if (index === 0) {
-          builder.where(field, 'LIKE', `%${query}%`);
+          builder.where(field, "LIKE", `%${query}%`);
         } else {
-          builder.orWhere(field, 'LIKE', `%${query}%`);
+          builder.orWhere(field, "LIKE", `%${query}%`);
         }
       });
     }
@@ -301,7 +301,7 @@ export class Searchable {
   @scopeMethod()
   static scopeAdvancedSearch(builder: EloquentBuilder<any>, params: any) {
     Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
+      if (value !== undefined && value !== null && value !== "") {
         if (Array.isArray(value)) {
           builder.whereIn(key, value);
         } else {
@@ -317,7 +317,7 @@ export class Searchable {
  * Cacheable trait for caching queries
  * Usage: use Cacheable;
  */
-@trait('Cacheable')
+@trait("Cacheable")
 export class Cacheable {
   /**
    * Cache a query result
@@ -334,7 +334,7 @@ export class Cacheable {
    */
   @macroMethod()
   static clearCache(): void {
-    console.log('Clearing model cache');
+    console.log("Clearing model cache");
   }
 
   /**

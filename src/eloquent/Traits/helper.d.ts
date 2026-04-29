@@ -1,6 +1,6 @@
 // src/types/eloquent-traits-helper.d.ts
-import type { Model } from '@/eloquent/Model';
-import type { EloquentBuilder } from '@/eloquent/EloquentBuilder';
+import type { Model } from "@/eloquent/Model";
+import type { EloquentBuilder } from "@/eloquent/EloquentBuilder";
 
 /**
  * Extract instance methods from a trait class.
@@ -8,7 +8,7 @@ import type { EloquentBuilder } from '@/eloquent/EloquentBuilder';
  */
 type InstanceMethods<T> = {
   [K in keyof T as T[K] extends Function
-    ? K extends 'constructor'
+    ? K extends "constructor"
       ? never
       : K
     : T[K] extends object
@@ -27,7 +27,7 @@ type StaticMethods<T> = {
  * Utility to merge traits into a Model instance type.
  */
 type WithTraitsInstance<M, Traits extends readonly any[]> = M &
-  UnionToIntersection<InstanceMethods<Traits[number]['prototype']>>;
+  UnionToIntersection<InstanceMethods<Traits[number]["prototype"]>>;
 
 /**
  * Utility to merge traits into a Model static type.
@@ -66,7 +66,7 @@ export type BuilderWithTraitScopes<M, Traits extends readonly any[]> = EloquentB
       [T in Traits[number]]: {
         [K in keyof T as K extends `scope${string}`
           ? K extends `scope${infer Name}`
-            ? Name extends ''
+            ? Name extends ""
               ? never
               : Uncapitalize<Name>
             : never
@@ -128,7 +128,7 @@ export declare function use<Traits extends readonly any[]>(
 ): <MClass extends new (...args: any) => Model>(ctor: MClass) => AttachTraits<MClass, Traits>;
 
 /** Module augmentation to bind typed decorator to actual export path used in models */
-declare module '@/eloquent/Model' {
+declare module "@/eloquent/Model" {
   export function use<Traits extends readonly any[]>(
     ...traits: Traits
   ): <MClass extends new (...args: any) => Model>(ctor: MClass) => AttachTraits<MClass, Traits>;
