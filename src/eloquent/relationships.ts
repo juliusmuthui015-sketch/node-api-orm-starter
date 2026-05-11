@@ -1,8 +1,8 @@
 // relationships.ts
-import { Model } from "./Model";
-import { EloquentBuilder } from "./EloquentBuilder";
-import { query as dbQuery, getDbType, collection as mongoCollection } from "@/config/db.config";
-import { ObjectId } from "mongodb";
+import {Model} from "./Model";
+import {EloquentBuilder} from "./EloquentBuilder";
+import {collection as mongoCollection, getDbType, query as dbQuery} from "@/config/db.config";
+import {ObjectId} from "mongodb";
 
 // Helper: coerce 24-hex strings to ObjectId when writing *_id fields in Mongo
 const toObjectIdIfHex = (v: any) => {
@@ -34,98 +34,193 @@ export abstract class Relation<T extends Model> {
 
   abstract getResults(): Promise<T | T[] | null>;
 
-  // Common relation methods
+  // ─── Promise / thenable protocol ─────────────────────────────────────────────
+  // Allows `await user.profile()` to automatically resolve via getResults(),
+  // eliminating the need to always call .getResults() or .first() explicitly.
+
+  then<TResult1 = T | T[] | null, TResult2 = never>(
+    onfulfilled?: ((value: T | T[] | null) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2> {
+    return (this.getResults() as Promise<any>).then(onfulfilled, onrejected);
+  }
+
+  catch<TResult = never>(
+    onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | null,
+  ): Promise<T | T[] | null | TResult> {
+    return (this.getResults() as Promise<any>).catch(onrejected);
+  }
+
+  finally(onfinally?: (() => void) | null): Promise<T | T[] | null> {
+    return (this.getResults() as Promise<any>).finally(onfinally);
+  }
+
+  // ─── FK application hook ─────────────────────────────────────────────────────
+  // Subclasses override this to apply their FK WHERE clause to the builder.
+  // It must be idempotent (guard with a flag — see HasOne/HasMany/BelongsTo).
+  // Returns false when the parent has no key, signalling the caller should
+  // return an empty result rather than an unbounded query.
+  protected applyConstraints(): boolean { return true; }
+
+  // ─── Builder-returning methods ────────────────────────────────────────────────
+
+  /**
+   * Return the underlying EloquentBuilder with the FK constraint pre-applied.
+   * Use this to chain additional builder methods before executing:
+   *   user.posts().query().where('published', 1).orderBy('created_at').get()
+   */
+  query(): EloquentBuilder<T> {
+    this.applyConstraints();
+    return this.builder;
+  }
+
+  // ─── Execution shortcuts ──────────────────────────────────────────────────────
+
+  /**
+   * Execute the relation query and return all matching model instances.
+   *   await user.posts().get()
+   *   await user.posts().where('published', 1).get()
+   */
+  async get(): Promise<T[]> {
+    this.applyConstraints();
+    return this.builder.get();
+  }
+
+  async first(): Promise<T | null> {
+    this.applyConstraints();
+    return this.builder.first();
+  }
+
+  async firstOrFail(): Promise<T> {
+    this.applyConstraints();
+    return this.builder.firstOrFail();
+  }
+
+  async paginate(perPage: number = 15, page: number = 1) {
+    this.applyConstraints();
+    return this.builder.paginate(perPage, page);
+  }
+
+  async pluck(column: string, key?: string): Promise<any[] | Record<string, any>> {
+    this.applyConstraints();
+    return this.builder.pluck(column, key);
+  }
+
+  async value(column: string): Promise<any> {
+    this.applyConstraints();
+    return this.builder.value(column);
+  }
+
+  async sole(): Promise<T> {
+    this.applyConstraints();
+    return this.builder.sole();
+  }
+
+  async count(): Promise<number> {
+    this.applyConstraints();
+    return this.builder.count();
+  }
+
+  async exists(): Promise<boolean> {
+    this.applyConstraints();
+    return this.builder.exists();
+  }
+
+  async doesntExist(): Promise<boolean> {
+    this.applyConstraints();
+    return this.builder.doesntExist();
+  }
+
+  // ─── Fluent filter passthrough ────────────────────────────────────────────────
+
   where(column: string, operator?: any, value?: any): this {
+    this.applyConstraints();
     this.builder.where(column, operator, value);
     return this;
   }
 
-  query(): EloquentBuilder<T> {
-    return this.getQuery();
-  }
-
   orWhere(column: string, operator?: any, value?: any): this {
+    this.applyConstraints();
     this.builder.orWhere(column, operator, value);
     return this;
   }
 
   whereIn(column: string, values: any[]): this {
+    this.applyConstraints();
     this.builder.whereIn(column, values);
     return this;
   }
 
   whereNotIn(column: string, values: any[]): this {
+    this.applyConstraints();
     this.builder.whereNotIn(column, values);
     return this;
   }
 
   whereNull(column: string): this {
+    this.applyConstraints();
     this.builder.whereNull(column);
     return this;
   }
 
   whereNotNull(column: string): this {
+    this.applyConstraints();
     this.builder.whereNotNull(column);
     return this;
   }
 
   orderBy(column: string, direction: "asc" | "desc" = "asc"): this {
+    this.applyConstraints();
     this.builder.orderBy(column, direction);
     return this;
   }
 
   latest(column: string = "created_at"): this {
+    this.applyConstraints();
     this.builder.latest(column);
     return this;
   }
 
   oldest(column: string = "created_at"): this {
+    this.applyConstraints();
     this.builder.oldest(column);
     return this;
   }
 
   limit(limit: number): this {
+    this.applyConstraints();
     this.builder.limit(limit);
     return this;
   }
 
   offset(offset: number): this {
+    this.applyConstraints();
     this.builder.offset(offset);
     return this;
   }
 
   with(relations: string | string[] | Record<string, any>): this {
+    this.applyConstraints();
     this.builder.with(relations);
     return this;
   }
 
   select(columns: string[] | string): this {
+    this.applyConstraints();
     this.builder.select(columns);
     return this;
   }
 
-  async count(): Promise<number> {
-    return this.builder.count();
-  }
-
-  async exists(): Promise<boolean> {
-    return this.builder.exists();
-  }
-
-  async doesntExist(): Promise<boolean> {
-    return this.builder.doesntExist();
-  }
-
-  async first(): Promise<T | null> {
-    return this.builder.first();
-  }
-
   getQuery(): EloquentBuilder<T> {
+    this.applyConstraints();
     return this.builder;
   }
 }
 
 export class HasOne<T extends Model> extends Relation<T> {
+  private defaultAttributes?: Record<string, any> | true;
+  private fkApplied = false;
+
   constructor(
     protected relatedModel: typeof Model,
     protected foreignKey: string,
@@ -135,23 +230,56 @@ export class HasOne<T extends Model> extends Relation<T> {
     super(relatedModel, parent);
   }
 
-  async getResults(): Promise<T | null> {
+  /**
+   * Apply the FK constraint exactly once; subsequent calls are no-ops.
+   * This prevents duplicate WHERE clauses when getResults()/first() are
+   * called more than once on the same relation instance.
+   */
+  protected applyFk(): boolean {
+    if (this.fkApplied) return true;
     const localValue = (this.parent as any).getAttribute(this.localKey);
-    if (localValue === undefined || localValue === null) return null;
-
+    if (localValue === undefined || localValue === null) return false;
     this.builder.where(this.foreignKey, localValue);
-    return await this.builder.first();
+    this.fkApplied = true;
+    return true;
+  }
+
+  protected applyConstraints(): boolean {
+    return this.applyFk();
+  }
+
+  async getResults(): Promise<T | null> {
+    if (!this.applyFk()) return this.resolveDefault();
+    const result = await this.builder.first();
+    return result ?? this.resolveDefault();
+  }
+
+  async first(): Promise<T | null> {
+    if (!this.applyFk()) return this.resolveDefault();
+    const result = await this.builder.first();
+    return result ?? this.resolveDefault();
   }
 
   /**
-   * Override base `first()` to ensure the FK constraint is applied before
-   * querying, the same way `getResults()` does. The base class calls
-   * `this.builder.first()` directly without any WHERE clause.
+   * Provide a default model when the relation returns null.
+   * Pass `true` for an empty instance, or a plain object for pre-filled attributes.
+   *
+   * @example user.profile().withDefault({ gender: 'unknown' })
    */
-  async first(): Promise<T | null> {
-    const localValue = (this.parent as any).getAttribute(this.localKey);
-    if (localValue === undefined || localValue === null) return null;
-    return await this.builder.where(this.foreignKey, localValue).first();
+  withDefault(attributes: Record<string, any> | true = true): this {
+    this.defaultAttributes = attributes;
+    return this;
+  }
+
+  private resolveDefault(): T | null {
+    if (!this.defaultAttributes) return null;
+    const instance = new (this.relatedModel as any)() as T;
+    if (typeof this.defaultAttributes === "object") {
+      Object.entries(this.defaultAttributes).forEach(([k, v]) =>
+        (instance as any).setAttribute(k, v),
+      );
+    }
+    return instance;
   }
 
   // HasOne specific methods
@@ -203,6 +331,8 @@ export class HasOne<T extends Model> extends Relation<T> {
 }
 
 export class HasMany<T extends Model> extends Relation<T> {
+  private fkApplied = false;
+
   constructor(
     protected relatedModel: typeof Model,
     protected foreignKey: string,
@@ -212,22 +342,27 @@ export class HasMany<T extends Model> extends Relation<T> {
     super(relatedModel, parent);
   }
 
-  async getResults(): Promise<T[]> {
+  protected applyFk(): boolean {
+    if (this.fkApplied) return true;
     const localValue = (this.parent as any).getAttribute(this.localKey);
-    if (localValue === undefined || localValue === null) return [];
-
+    if (localValue === undefined || localValue === null) return false;
     this.builder.where(this.foreignKey, localValue);
+    this.fkApplied = true;
+    return true;
+  }
+
+  protected applyConstraints(): boolean {
+    return this.applyFk();
+  }
+
+  async getResults(): Promise<T[]> {
+    if (!this.applyFk()) return [];
     return await this.builder.get();
   }
 
-  /**
-   * Override base `first()` to ensure the FK constraint is applied
-   * before querying (base class skips the FK WHERE clause).
-   */
   async first(): Promise<T | null> {
-    const localValue = (this.parent as any).getAttribute(this.localKey);
-    if (localValue === undefined || localValue === null) return null;
-    return await this.builder.where(this.foreignKey, localValue).first();
+    if (!this.applyFk()) return null;
+    return await this.builder.first();
   }
 
   // HasMany specific methods
@@ -428,6 +563,9 @@ export class HasMany<T extends Model> extends Relation<T> {
 }
 
 export class BelongsTo<T extends Model> extends Relation<T> {
+  private defaultAttributes?: Record<string, any> | true;
+  private fkApplied = false;
+
   constructor(
     private relatedModel: typeof Model,
     private foreignKey: string,
@@ -437,22 +575,45 @@ export class BelongsTo<T extends Model> extends Relation<T> {
     super(relatedModel, parent);
   }
 
-  async getResults(): Promise<T | null> {
+  protected applyFk(): boolean {
+    if (this.fkApplied) return true;
     const foreignValue = (this.parent as any).getAttribute(this.foreignKey);
-    if (foreignValue === undefined || foreignValue === null) return null;
-
+    if (foreignValue === undefined || foreignValue === null) return false;
     this.builder.where(this.ownerKey, foreignValue);
-    return await this.builder.first();
+    this.fkApplied = true;
+    return true;
   }
 
-  /**
-   * Override base `first()` to ensure the owner-key constraint is applied
-   * before querying (base class skips the WHERE clause).
-   */
+  protected applyConstraints(): boolean {
+    return this.applyFk();
+  }
+
+  async getResults(): Promise<T | null> {
+    if (!this.applyFk()) return this.resolveDefault();
+    const result = await this.builder.first();
+    return result ?? this.resolveDefault();
+  }
+
   async first(): Promise<T | null> {
-    const foreignValue = (this.parent as any).getAttribute(this.foreignKey);
-    if (foreignValue === undefined || foreignValue === null) return null;
-    return await this.builder.where(this.ownerKey, foreignValue).first();
+    if (!this.applyFk()) return this.resolveDefault();
+    const result = await this.builder.first();
+    return result ?? this.resolveDefault();
+  }
+
+  withDefault(attributes: Record<string, any> | true = true): this {
+    this.defaultAttributes = attributes;
+    return this;
+  }
+
+  private resolveDefault(): T | null {
+    if (!this.defaultAttributes) return null;
+    const instance = new (this.relatedModel as any)() as T;
+    if (typeof this.defaultAttributes === "object") {
+      Object.entries(this.defaultAttributes).forEach(([k, v]) =>
+        (instance as any).setAttribute(k, v),
+      );
+    }
+    return instance;
   }
 
   // BelongsTo specific methods
@@ -669,6 +830,10 @@ export class BelongsToMany<T extends Model> extends Relation<T> {
       }
       return instance;
     });
+  }
+
+  async get(): Promise<T[]> {
+    return this.getResults();
   }
 
   // Pivot management methods
@@ -1072,6 +1237,147 @@ export class Pivot {
   }
 }
 
+// ─── Through relationships ────────────────────────────────────────────────────
+
+/**
+ * HasOneThrough — reach a distant model through an intermediate one.
+ *
+ * Example: User hasOneThrough(Insurance, Policy, 'user_id', 'policy_id', 'id', 'id')
+ *   users → policies (via policies.user_id) → insurances (via insurances.policy_id)
+ */
+export class HasOneThrough<T extends Model> extends Relation<T> {
+  constructor(
+    protected relatedModel: typeof Model,
+    protected throughModel: typeof Model,
+    protected firstKey: string,
+    protected secondKey: string,
+    protected localKey: string = "id",
+    protected secondLocalKey: string = "id",
+    parent: Model,
+  ) {
+    super(relatedModel, parent);
+  }
+
+  async getResults(): Promise<T | null> {
+    const localValue = (this.parent as any).getAttribute(this.localKey);
+    if (localValue === undefined || localValue === null) return null;
+
+    if (getDbType() === "mongodb") {
+      const tc = mongoCollection((this.throughModel as typeof Model).getTable());
+      const throughDoc = await tc.findOne({ [this.firstKey]: localValue } as any);
+      if (!throughDoc) return null;
+      const secondValue = throughDoc[this.secondLocalKey];
+      const rc = mongoCollection((this.relatedModel as typeof Model).getTable());
+      const doc = await rc.findOne({ [this.secondKey]: secondValue } as any);
+      if (!doc) return null;
+      if (doc._id && !("id" in doc)) doc.id = String(doc._id);
+      const inst = new (this.relatedModel as any)() as T;
+      inst.hydrate(doc);
+      return inst;
+    }
+
+    const throughTable = (this.throughModel as typeof Model).getTable();
+    const relatedTable = (this.relatedModel as typeof Model).getTable();
+    const rows = await dbQuery<any>(
+      `SELECT ${relatedTable}.* FROM ${relatedTable}
+       INNER JOIN ${throughTable} ON ${throughTable}.${this.secondLocalKey} = ${relatedTable}.${this.secondKey}
+       WHERE ${throughTable}.${this.firstKey} = ? LIMIT 1`,
+      [localValue],
+    );
+    if (!rows.length) return null;
+    const inst = new (this.relatedModel as any)() as T;
+    inst.hydrate(rows[0]);
+    return inst;
+  }
+
+  async get(): Promise<T[]> {
+    const result = await this.getResults();
+    return result ? [result] : [];
+  }
+
+  async first(): Promise<T | null> {
+    return this.getResults();
+  }
+}
+
+/**
+ * HasManyThrough — reach many distant models through an intermediate one.
+ *
+ * Example: Country hasManyThrough(Post, User, 'country_id', 'user_id', 'id', 'id')
+ *   countries → users (via users.country_id) → posts (via posts.user_id)
+ */
+export class HasManyThrough<T extends Model> extends Relation<T> {
+  constructor(
+    protected relatedModel: typeof Model,
+    protected throughModel: typeof Model,
+    protected firstKey: string,
+    protected secondKey: string,
+    protected localKey: string = "id",
+    protected secondLocalKey: string = "id",
+    parent: Model,
+  ) {
+    super(relatedModel, parent);
+  }
+
+  async getResults(): Promise<T[]> {
+    const localValue = (this.parent as any).getAttribute(this.localKey);
+    if (localValue === undefined || localValue === null) return [];
+
+    if (getDbType() === "mongodb") {
+      const tc = mongoCollection((this.throughModel as typeof Model).getTable());
+      const throughDocs = await tc.find({ [this.firstKey]: localValue } as any).toArray();
+      if (!throughDocs.length) return [];
+      const secondValues = throughDocs.map((d: any) => d[this.secondLocalKey]);
+      const rc = mongoCollection((this.relatedModel as typeof Model).getTable());
+      const docs = await rc.find({ [this.secondKey]: { $in: secondValues } } as any).toArray();
+      return docs.map((doc: any) => {
+        if (doc._id && !("id" in doc)) doc.id = String(doc._id);
+        const inst = new (this.relatedModel as any)() as T;
+        inst.hydrate(doc);
+        return inst;
+      });
+    }
+
+    const throughTable = (this.throughModel as typeof Model).getTable();
+    const relatedTable = (this.relatedModel as typeof Model).getTable();
+
+    const whereClauses = (this.builder as any).whereClauses as any[];
+    let extraSql = "";
+    const extraParams: any[] = [];
+    if (whereClauses.length) {
+      extraSql = whereClauses
+        .map((w: any) => ` AND ${relatedTable}.${w.column} ${w.operator} ?`)
+        .join("");
+      extraParams.push(...whereClauses.map((w: any) => w.value));
+    }
+
+    const softDelete = (this.relatedModel as any).softDeletes
+      ? ` AND ${relatedTable}.deleted_at IS NULL`
+      : "";
+
+    const rows = await dbQuery<any>(
+      `SELECT ${relatedTable}.* FROM ${relatedTable}
+       INNER JOIN ${throughTable} ON ${throughTable}.${this.secondLocalKey} = ${relatedTable}.${this.secondKey}
+       WHERE ${throughTable}.${this.firstKey} = ?${softDelete}${extraSql}`,
+      [localValue, ...extraParams],
+    );
+    return rows.map((row: any) => {
+      const inst = new (this.relatedModel as any)() as T;
+      inst.hydrate(row);
+      return inst;
+    });
+  }
+
+  async get(): Promise<T[]> {
+    return this.getResults();
+  }
+
+  async first(): Promise<T | null> {
+    const all = await this.getResults();
+    return all[0] || null;
+  }
+}
+
 // Morph relationships
 export class MorphOne<T extends Model> extends HasOne<T> {
   private morphType: string;
@@ -1099,8 +1405,7 @@ export class MorphOne<T extends Model> extends HasOne<T> {
   }
 
   async create(attributes: Record<string, any>): Promise<T> {
-    const foreignValue = (this.parent as any).getAttribute(this.localKey);
-    attributes[this.foreignKey] = foreignValue;
+    attributes[this.foreignKey] = (this.parent as any).getAttribute(this.localKey);
     attributes[`${this.morphType}_type`] = this.parent.constructor.name;
 
     const instance = new (this.relatedModel as any)(attributes) as T;

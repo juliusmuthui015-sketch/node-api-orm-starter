@@ -451,6 +451,313 @@ export class EloquentBuilder<T extends Model> {
     return this.orderBy(column, "asc");
   }
 
+  rightJoin(table: string, first: string, operator: string, second: string): this {
+    return this.join(table, first, operator, second, "right");
+  }
+
+  crossJoin(table: string): this {
+    this.joinClauses.push({ table, first: "", operator: "", second: "", type: "cross" });
+    return this;
+  }
+
+  // ─── Convenience OR-where helpers ────────────────────────────────────────────
+
+  orWhereNull(column: string): this {
+    this.whereClauses.push({ column, operator: "=", value: null, boolean: "or" });
+    return this;
+  }
+
+  orWhereNotNull(column: string): this {
+    this.whereClauses.push({ column, operator: "!=", value: null, boolean: "or" });
+    return this;
+  }
+
+  orWhereIn(column: string, values: any[]): this {
+    this.whereClauses.push({ column, operator: "IN", value: values, boolean: "or" });
+    return this;
+  }
+
+  orWhereNotIn(column: string, values: any[]): this {
+    this.whereClauses.push({ column, operator: "NOT IN", value: values, boolean: "or" });
+    return this;
+  }
+
+  orWhereBetween(column: string, range: [any, any]): this {
+    this.whereClauses.push({ column, operator: "BETWEEN", value: range, boolean: "or" });
+    return this;
+  }
+
+  orWhereNotBetween(column: string, range: [any, any]): this {
+    this.whereClauses.push({ column, operator: "NOT BETWEEN", value: range, boolean: "or" });
+    return this;
+  }
+
+  // ─── LIKE helpers ─────────────────────────────────────────────────────────────
+
+  whereLike(column: string, value: string): this {
+    this.whereClauses.push({ column, operator: "LIKE", value, boolean: "and" });
+    return this;
+  }
+
+  whereNotLike(column: string, value: string): this {
+    this.whereClauses.push({ column, operator: "NOT LIKE", value, boolean: "and" });
+    return this;
+  }
+
+  orWhereLike(column: string, value: string): this {
+    this.whereClauses.push({ column, operator: "LIKE", value, boolean: "or" });
+    return this;
+  }
+
+  orWhereNotLike(column: string, value: string): this {
+    this.whereClauses.push({ column, operator: "NOT LIKE", value, boolean: "or" });
+    return this;
+  }
+
+  // ─── Raw SQL ──────────────────────────────────────────────────────────────────
+
+  whereRaw(sql: string, bindings: any[] = []): this {
+    this.whereClauses.push({ column: sql, operator: "raw", value: bindings, boolean: "and" });
+    return this;
+  }
+
+  orWhereRaw(sql: string, bindings: any[] = []): this {
+    this.whereClauses.push({ column: sql, operator: "raw", value: bindings, boolean: "or" });
+    return this;
+  }
+
+  // ─── Conditional helpers ─────────────────────────────────────────────────────
+
+  /** Apply callback only when condition is truthy. */
+  when<V = boolean>(
+    condition: V,
+    callback: (builder: this, value: NonNullable<V>) => void,
+    elseCallback?: (builder: this) => void,
+  ): this {
+    if (condition) {
+      callback(this, condition as any);
+    } else if (elseCallback) {
+      elseCallback(this);
+    }
+    return this;
+  }
+
+  /** Apply callback only when condition is falsy (inverse of when). */
+  unless<V = boolean>(condition: V, callback: (builder: this) => void): this {
+    if (!condition) callback(this);
+    return this;
+  }
+
+  /** Inspect the builder without interrupting the chain. */
+  tap(callback: (builder: this) => void): this {
+    callback(this);
+    return this;
+  }
+
+  // ─── Clone ────────────────────────────────────────────────────────────────────
+
+  /** Return a deep copy of this builder so mutations don't affect the original. */
+  clone(): EloquentBuilder<T> {
+    const copy = new EloquentBuilder<T>(this.model);
+    (copy as any).withRelations = new Map(this.withRelations);
+    (copy as any).nestedRelations = new Map(this.nestedRelations);
+    (copy as any).relationPathOptions = new Map(this.relationPathOptions);
+    (copy as any).relationTree = JSON.parse(JSON.stringify(this.relationTree));
+    (copy as any).whereClauses = this.whereClauses.map((w) => ({ ...w }));
+    (copy as any).havingClauses = this.havingClauses.map((h) => ({ ...h }));
+    (copy as any).joinClauses = this.joinClauses.map((j) => ({ ...j }));
+    (copy as any).limitValue = this.limitValue;
+    (copy as any).offsetValue = this.offsetValue;
+    (copy as any).orderByColumn = this.orderByColumn;
+    (copy as any).orderByDirection = this.orderByDirection;
+    (copy as any).groupByColumns = [...this.groupByColumns];
+    (copy as any).hasConditions = this.hasConditions.map((h) => ({ ...h }));
+    (copy as any).selectedColumns = this.selectedColumns ? [...this.selectedColumns] : undefined;
+    (copy as any).distinctValue = this.distinctValue;
+    (copy as any).includeTrashed = this.includeTrashed;
+    (copy as any).appliedSoftDeleteFilter = this.appliedSoftDeleteFilter;
+    (copy as any).onlyTrashedFlag = this.onlyTrashedFlag;
+    (copy as any).columnQualifier = this.columnQualifier;
+    (copy as any).appliedScopes = new Set(this.appliedScopes);
+    (copy as any).removedScopes = new Set(this.removedScopes);
+    return copy;
+  }
+
+  // ─── Retrieval helpers ────────────────────────────────────────────────────────
+
+  /** Shorthand for .where(column, op?, value).first() */
+  async firstWhere(
+  column: string | ((builder: EloquentBuilder<T>) => void),
+  operator?: any,
+  value?: any,
+): Promise<T | null> {
+    return this.where(column, operator, value).first();
+  }
+
+  /** Retrieve a single column value from the first matching row. */
+  async value(column: string): Promise<any> {
+    const row = await this.select(column).first();
+    return row ? (row as any).getAttribute(column) : null;
+  }
+
+  /**
+   * Return the only record matching the query.
+   * Throws if zero or more than one records are found.
+   */
+  async sole(): Promise<T> {
+    const results = await this.limit(2).get();
+    if (results.length === 0) {
+      throw new Error(`${(this.model as any).name || "Model"} not found`);
+    }
+    if (results.length > 1) {
+      throw new Error(`Multiple ${(this.model as any).name || "Model"} records found`);
+    }
+    return results[0];
+  }
+
+  /** Pluck a single column into an array, optionally keyed by another column. */
+  async pluck(column: string, key?: string): Promise<any[] | Record<string, any>> {
+    const cols = key ? [column, key] : [column];
+    const rows = await this.select(cols).get();
+    if (key) {
+      const result: Record<string, any> = {};
+      rows.forEach((r) => {
+        const k = (r as any).getAttribute(key);
+        result[k] = (r as any).getAttribute(column);
+      });
+      return result;
+    }
+    return rows.map((r) => (r as any).getAttribute(column));
+  }
+
+  /**
+   * Process matching records in chunks to avoid loading everything into memory.
+   * Callback receives a page of records; return false to stop early.
+   */
+  async chunk(size: number, callback: (rows: T[], page: number) => boolean | void | Promise<boolean | void>): Promise<void> {
+    let page = 1;
+    while (true) {
+      const rows = await this.clone().limit(size).offset((page - 1) * size).get();
+      if (!rows.length) break;
+      const result = await callback(rows, page);
+      if (result === false || rows.length < size) break;
+      page++;
+    }
+  }
+
+  /**
+   * Like chunk() but advances via the primary key for stability on live tables.
+   */
+  async chunkById(
+    size: number,
+    callback: (rows: T[], page: number) => boolean | void | Promise<boolean | void>,
+    column?: string,
+  ): Promise<void> {
+    const pk = column || (this.model as any).primaryKey || "id";
+    let lastId: any = null;
+    let page = 1;
+    while (true) {
+      const q = this.clone().orderBy(pk, "asc").limit(size);
+      if (lastId !== null) q.where(pk, ">", lastId);
+      const rows = await q.get();
+      if (!rows.length) break;
+      const result = await callback(rows, page);
+      lastId = (rows[rows.length - 1] as any).getAttribute(pk);
+      if (result === false || rows.length < size) break;
+      page++;
+    }
+  }
+
+  /** Async generator that yields results one at a time without holding all in memory. */
+  async *cursor(): AsyncGenerator<T> {
+    const rows = await this.get();
+    for (const row of rows) {
+      yield row;
+    }
+  }
+
+  // ─── Debug / inspection ───────────────────────────────────────────────────────
+
+  /** Return the SQL string (with ? placeholders) without executing the query. */
+  toSql(): string {
+    if (getDbType() === "mongodb") return "[MongoDB – use toMongo() for filter object]";
+    const tableName = (this.model as typeof Model).getTable();
+    const copy = this.clone();
+    const prev = (copy as any).columnQualifier;
+    (copy as any).columnQualifier = tableName;
+    const where = (copy as any).buildWhereClause();
+    (copy as any).columnQualifier = prev;
+
+    const select = (copy as any).distinctValue ? "SELECT DISTINCT" : "SELECT";
+    const columns =
+      (copy as any).selectedColumns && (copy as any).selectedColumns.length
+        ? (copy as any).selectedColumns.join(",")
+        : "*";
+    const parts: string[] = [`${select} ${columns} FROM ${tableName}`];
+
+    (copy as any).joinClauses.forEach((join: any) => {
+      if (join.type === "cross") {
+        parts.push(`CROSS JOIN ${join.table}`);
+      } else {
+        parts.push(`${join.type.toUpperCase()} JOIN ${join.table} ON ${join.first} ${join.operator} ${join.second}`);
+      }
+    });
+
+    if (where.sql) parts.push(where.sql);
+    if ((copy as any).groupByColumns.length)
+      parts.push(`GROUP BY ${(copy as any).groupByColumns.join(", ")}`);
+    if ((copy as any).orderByColumn)
+      parts.push(`ORDER BY ${(copy as any).orderByColumn} ${(copy as any).orderByDirection.toUpperCase()}`);
+    if ((copy as any).limitValue !== undefined) parts.push(`LIMIT ${(copy as any).limitValue}`);
+    if ((copy as any).offsetValue !== undefined) parts.push(`OFFSET ${(copy as any).offsetValue}`);
+    return parts.join(" ");
+  }
+
+  /**
+   * Return the MongoDB query descriptor without executing — the Mongo equivalent of toSql().
+   *
+   * Returns:
+   *   collection  — collection name derived from the model's table
+   *   filter      — MongoDB filter document (the full $and/$or object)
+   *   sort        — e.g. { created_at: -1 }  (only present when orderBy is set)
+   *   limit       — cursor limit              (only present when limit() was called)
+   *   skip        — cursor skip offset        (only present when offset() was called)
+   *   projection  — { col: 1 } map            (only present when select() was called)
+   */
+  toMongo(): {
+    collection: string;
+    filter: Record<string, any>;
+    sort?: Record<string, 1 | -1>;
+    limit?: number;
+    skip?: number;
+    projection?: Record<string, 1>;
+  } {
+    const copy = this.clone();
+    const collectionName = (this.model as typeof Model).getTable();
+    const filter: Record<string, any> = (copy as any).buildMongoFilter();
+
+    const result: ReturnType<EloquentBuilder<T>["toMongo"]> = { collection: collectionName, filter };
+
+    if ((copy as any).orderByColumn) {
+      const dir: 1 | -1 = (copy as any).orderByDirection === "desc" ? -1 : 1;
+      result.sort = { [(copy as any).orderByColumn]: dir };
+    }
+    if ((copy as any).limitValue !== undefined) {
+      result.limit = (copy as any).limitValue;
+    }
+    if ((copy as any).offsetValue !== undefined) {
+      result.skip = (copy as any).offsetValue;
+    }
+    const cols: string[] | undefined = (copy as any).selectedColumns;
+    if (cols && cols.length && cols[0] !== "*") {
+      result.projection = Object.fromEntries(
+        cols.map((k) => [(copy as any).normalizeField(k), 1]),
+      ) as Record<string, 1>;
+    }
+
+    return result;
+  }
+
   async get(): Promise<T[]> {
     const data = await this.executeQuery();
 
@@ -797,7 +1104,17 @@ export class EloquentBuilder<T extends Model> {
       !this.onlyTrashedFlag &&
       !this.whereClauses.some((w) => w.column === "deleted_at")
     ) {
-      this.whereClauses.push({ column: "deleted_at", operator: "=", value: null, boolean: "and" });
+      // If user has mixed AND/OR conditions, wrap them in a nested group so the
+      // soft-delete constraint applies to the whole result set rather than only
+      // binding to the last OR branch (SQL AND has higher precedence than OR).
+      const hasOrClauses = this.whereClauses.some((w) => (w.boolean || "and") === "or");
+      if (hasOrClauses && this.whereClauses.length > 0) {
+        const existing = this.whereClauses.splice(0);
+        this.whereClauses.push({ column: "deleted_at", operator: "=", value: null, boolean: "and" });
+        this.whereClauses.push({ column: "", operator: "nested", value: existing, boolean: "and" });
+      } else {
+        this.whereClauses.push({ column: "deleted_at", operator: "=", value: null, boolean: "and" });
+      }
       this.appliedSoftDeleteFilter = true;
     }
     if (!this.whereClauses.length) return { sql: "", params: [] };
@@ -822,6 +1139,12 @@ export class EloquentBuilder<T extends Model> {
           parts.push(`${boolOp}(${nested.sql})`);
           params.push(...nested.params);
         }
+        return;
+      }
+
+      if (op === "raw") {
+        parts.push(`${boolOp}${w.column}`);
+        if (Array.isArray(w.value)) params.push(...w.value);
         return;
       }
 
@@ -874,6 +1197,9 @@ export class EloquentBuilder<T extends Model> {
           parts.push(`${boolOp}(${nested.sql})`);
           params.push(...nested.params);
         }
+      } else if ((w.operator || "").toLowerCase() === "raw") {
+        parts.push(`${boolOp}${w.column}`);
+        if (Array.isArray(w.value)) params.push(...w.value);
       } else if (Array.isArray(w.value) && (w.operator || "").toLowerCase() === "in") {
         const placeholders = w.value.map(() => "?").join(", ");
         parts.push(`${boolOp}${qualify(w.column)} IN (${placeholders})`);
@@ -1359,9 +1685,13 @@ export class EloquentBuilder<T extends Model> {
 
     // Add joins
     this.joinClauses.forEach((join) => {
-      parts.push(
-        `${join.type.toUpperCase()} JOIN ${join.table} ON ${join.first} ${join.operator} ${join.second}`,
-      );
+      if (join.type === "cross") {
+        parts.push(`CROSS JOIN ${join.table}`);
+      } else {
+        parts.push(
+          `${join.type.toUpperCase()} JOIN ${join.table} ON ${join.first} ${join.operator} ${join.second}`,
+        );
+      }
     });
 
     // Add where clause (qualify with base table to avoid ambiguity)

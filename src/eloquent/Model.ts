@@ -1,7 +1,7 @@
 // Model.ts
 import { ModelAttributes, RelationshipConfig, Casts } from "./types";
 import { EloquentBuilder } from "./EloquentBuilder";
-import { HasOne, HasMany, BelongsTo, BelongsToMany } from "./relationships";
+import { HasOne, HasMany, BelongsTo, BelongsToMany, HasOneThrough, HasManyThrough } from "./relationships";
 import { getDbType, collection as mongoCollection } from "@/config/db.config";
 import DB from "./DB";
 import util from "util";
@@ -160,7 +160,7 @@ export abstract class Model {
     // `receiver` (the proxy) so that `this.someAttribute` resolves correctly.
     const modelBaseProto = Model.prototype;
 
-    return new Proxy(this, {
+    const proxy = new Proxy(this, {
       get: (target: any, prop: PropertyKey, receiver: any) => {
         if (typeof prop === "string") {
           // Always return the real constructor so static property access works
@@ -172,16 +172,23 @@ export abstract class Model {
           const staticClass = target.constructor as typeof Model;
           const isAppended = staticClass.appends.includes(prop);
 
-          // Handle accessors first (only if it's an appended attribute or direct property access)
-          const accessorValue = target.getAttributeWithAccessor(prop, isAppended);
-          if (accessorValue !== undefined) {
-            return accessorValue;
-          }
-
           // Loaded relationships take priority over same-named instance methods so that
           // user.profile returns the eager-loaded UserProfile, not the profile() method.
           if (prop in target.relationshipsLoaded) {
             return target.relationshipsLoaded[prop];
+          }
+
+          if (prop in target.attributes) {
+            return target.attributes[prop];
+          }
+
+          // Handle accessors first (only if it's an appended attribute or direct property access)
+          const hasAccessor =
+            target.hasAccessor?.(prop) ||
+            typeof target[`get${prop[0].toUpperCase() + prop.slice(1)}Attribute`] === "function";
+
+          if (hasAccessor) {
+            return target.getAttributeWithAccessor(prop, isAppended);
           }
 
           if (prop in target && typeof target[prop] === "function") {
@@ -191,9 +198,7 @@ export abstract class Model {
             const isModelBaseMethod = prop in modelBaseProto;
             return target[prop].bind(isModelBaseMethod ? target : receiver);
           }
-          if (prop in target.attributes) {
-            return target.attributes[prop];
-          }
+
           if (prop in target) {
             const val = target[prop];
             return typeof val === "function" ? val.bind(target) : val;
@@ -210,6 +215,8 @@ export abstract class Model {
             "relationshipsLoaded",
             "__isGettingAttribute",
             "__attributeCache",
+            "__proxy",
+            "__exists",
           ]);
           if (internalProps.has(prop)) {
             (target as any)[prop] = value;
@@ -228,6 +235,9 @@ export abstract class Model {
         return true;
       },
     });
+
+    (this as any).__proxy = proxy;
+    return proxy;
   }
 
   static getFillables() {
@@ -494,8 +504,9 @@ export abstract class Model {
    */
   static async dispatchEvent(event: keyof ModelEvents, model: Model): Promise<void> {
     const listeners = this.eventListeners[event] || [];
+    const proxyModel = (model as any).__proxy ?? model;
     for (const listener of listeners) {
-      await listener(model);
+      await listener(proxyModel);
     }
   }
 
@@ -508,9 +519,13 @@ export abstract class Model {
     halt: boolean = false,
   ): Promise<boolean> {
     const listeners = this.eventListeners[event] || [];
+    // Pass the proxy to observers so property access like model.cover_id works.
+    // Base methods are bound to the raw target, so `this` in those contexts is
+    // the unwrapped instance — __proxy is the Proxy returned from the constructor.
+    const proxyModel = (model as any).__proxy ?? model;
 
     for (const listener of listeners) {
-      const result = await listener(model);
+      const result = await listener(proxyModel);
 
       if (halt === true && result === false) {
         return false;
@@ -1525,9 +1540,19 @@ export abstract class Model {
     Object.keys(attributes).forEach((key) => {
       this.setAttribute(key, attributes[key]);
     });
+
+    // Ensure every fillable key is present (null if not in DB result),
+    // so direct property access like model.cover_id never returns undefined.
+    const staticClass = this.constructor as typeof Model;
+    staticClass.fillable.forEach((key) => {
+      if (!(key in this.attributes)) {
+        this.attributes[key] = null;
+      }
+    });
+
     this.original = { ...this.attributes };
     this.__exists = true;
-    this.__attributeCache.clear(); // Clear entire cache
+    this.__attributeCache.clear();
     return this;
   }
 
@@ -1777,7 +1802,8 @@ export abstract class Model {
     const table = (model as unknown as typeof Model).getTable();
     const singularTable = table.endsWith("s") ? table.slice(0, -1) : table;
     const fk = foreignKey || `${singularTable}_id`;
-    const lk = localKey || (model as unknown as typeof Model).primaryKey || "id";
+    // localKey is a column on THIS (parent) model, so default to the parent's PK
+    const lk = localKey || (this.constructor as typeof Model).primaryKey || "id";
     return new HasOne(model as unknown as typeof Model, fk, lk, this);
   }
 
@@ -1790,8 +1816,73 @@ export abstract class Model {
     const table = (model as unknown as typeof Model).getTable();
     const singularTable = table.endsWith("s") ? table.slice(0, -1) : table;
     const fk = foreignKey || `${singularTable}_id`;
-    const lk = localKey || (model as unknown as typeof Model).primaryKey || "id";
+    // localKey is a column on THIS (parent) model, so default to the parent's PK
+    const lk = localKey || (this.constructor as typeof Model).primaryKey || "id";
     return new HasMany(model as unknown as typeof Model, fk, lk, this);
+  }
+
+  /**
+   * Define a has-one-through relationship.
+   *
+   * @param model       The distant (target) model
+   * @param through     The intermediate model
+   * @param firstKey    FK on the intermediate table pointing to the parent (default: parent_table_id)
+   * @param secondKey   FK on the target table pointing to the intermediate (default: through_table_id)
+   * @param localKey    PK on the parent (default: id)
+   * @param secondLocalKey  PK on the intermediate (default: id)
+   */
+  hasOneThrough<T extends Model>(
+    this: any,
+    model: new () => T,
+    through: new () => Model,
+    firstKey?: string,
+    secondKey?: string,
+    localKey?: string,
+    secondLocalKey?: string,
+  ): HasOneThrough<T> {
+    const parentTable = (this.constructor as typeof Model).getTable();
+    const throughTable = (through as unknown as typeof Model).getTable();
+    const fk1 = firstKey || `${parentTable}_id`;
+    const fk2 = secondKey || `${throughTable}_id`;
+    const lk = localKey || (this.constructor as typeof Model).primaryKey || "id";
+    const lk2 = secondLocalKey || (through as unknown as typeof Model).primaryKey || "id";
+    return new HasOneThrough(
+      model as unknown as typeof Model,
+      through as unknown as typeof Model,
+      fk1, fk2, lk, lk2, this,
+    );
+  }
+
+  /**
+   * Define a has-many-through relationship.
+   *
+   * @param model       The distant (target) model
+   * @param through     The intermediate model
+   * @param firstKey    FK on the intermediate table pointing to the parent
+   * @param secondKey   FK on the target table pointing to the intermediate
+   * @param localKey    PK on the parent (default: id)
+   * @param secondLocalKey  PK on the intermediate (default: id)
+   */
+  hasManyThrough<T extends Model>(
+    this: any,
+    model: new () => T,
+    through: new () => Model,
+    firstKey?: string,
+    secondKey?: string,
+    localKey?: string,
+    secondLocalKey?: string,
+  ): HasManyThrough<T> {
+    const parentTable = (this.constructor as typeof Model).getTable();
+    const throughTable = (through as unknown as typeof Model).getTable();
+    const fk1 = firstKey || `${parentTable}_id`;
+    const fk2 = secondKey || `${throughTable}_id`;
+    const lk = localKey || (this.constructor as typeof Model).primaryKey || "id";
+    const lk2 = secondLocalKey || (through as unknown as typeof Model).primaryKey || "id";
+    return new HasManyThrough(
+      model as unknown as typeof Model,
+      through as unknown as typeof Model,
+      fk1, fk2, lk, lk2, this,
+    );
   }
 
   belongsTo<T extends Model>(
@@ -1911,6 +2002,16 @@ export abstract class Model {
         this.setAttribute("created_at", now);
       }
       this.setAttribute("updated_at", now);
+    }
+
+    // For new records, ensure all fillable fields are present (null if not set)
+    // so the DB document is fully shaped and observers/hydrate see consistent keys.
+    if (!this.__exists) {
+      staticClass.fillable.forEach((key) => {
+        if (!(key in this.attributes)) {
+          this.attributes[key] = null;
+        }
+      });
     }
 
     const attrs = { ...this.attributes } as any;
@@ -2443,6 +2544,7 @@ export abstract class Model {
 
   // Utility methods
   private castAttribute(key: string, value: any): any {
+    if (value === null || value === undefined) return null;
     const staticClass = this.constructor as typeof Model;
     const castType = staticClass.casts[key];
     if (typeof castType === "function") {

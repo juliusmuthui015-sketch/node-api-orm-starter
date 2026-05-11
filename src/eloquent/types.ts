@@ -7,7 +7,7 @@ export interface ModelAttributes {
 }
 
 export interface RelationshipConfig {
-  type: "hasOne" | "hasMany" | "belongsTo" | "belongsToMany" | "morphOne" | "morphMany";
+  type: "hasOne" | "hasMany" | "belongsTo" | "belongsToMany" | "morphOne" | "morphMany" | "hasOneThrough" | "hasManyThrough";
   model: typeof Model;
   foreignKey?: string;
   localKey?: string;
@@ -17,6 +17,8 @@ export interface RelationshipConfig {
   table?: string;
   through?: typeof Model;
   pivotModel?: typeof Model;
+  secondKey?: string;
+  secondLocalKey?: string;
 }
 
 export interface Casts {
