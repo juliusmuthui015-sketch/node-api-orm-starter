@@ -1,11 +1,5 @@
 import { EventEmitter } from "events";
 import parser from "cron-parser";
-import {
-  Event as EloquentEvent,
-  Listener,
-  ListensTo,
-  getEventDispatcher,
-} from "@/eloquent/Core/Events";
 import { Cache } from "@/cache";
 
 /*
@@ -47,7 +41,7 @@ export interface ScheduledTask {
   conditions: Array<() => boolean | Promise<boolean>>;
   skipConditions: Array<() => boolean | Promise<boolean>>;
   betweenStart?: string; // "HH:MM"
-  betweenEnd?: string;   // "HH:MM"
+  betweenEnd?: string; // "HH:MM"
   onSuccessHook?: (task: ScheduledTask) => void;
   onFailureHook?: (task: ScheduledTask, error: Error) => void;
   lastRun?: Date;
@@ -56,23 +50,15 @@ export interface ScheduledTask {
 }
 
 export function createObservableTask(task: ScheduledTask): ScheduledTask {
-  return new Proxy(task, {
-    set(target, prop, value) {
-      if (prop === "expression" && target.expression !== value) {
-        target.expression = value;
-        try {
-          const interval = parser.parse(value, { tz: target.timezone || "UTC" });
-          target.nextRun = interval.next().toDate();
-        } catch {
-          // invalid expression — leave nextRun as-is
-        }
-        new TaskExpressionChangedEvent(target).dispatchNow();
-        return true;
-      }
-      (target as any)[prop] = value;
-      return true;
-    },
-  });
+  // Update nextRun once at registration — no Proxy needed since expression
+  // changes only happen during builder chaining, not at runtime.
+  try {
+    const interval = parser.parse(task.expression, { tz: task.timezone || "UTC" });
+    task.nextRun = interval.next().toDate();
+  } catch {
+    // invalid expression — leave nextRun as-is
+  }
+  return task;
 }
 
 /*
@@ -85,6 +71,8 @@ export class Schedule {
   private tasks: ScheduledTask[] = [];
   private running: boolean = false;
   private events: EventEmitter = new EventEmitter();
+  // Cache split cron parts keyed by expression string — avoids re-splitting on every tick
+  private readonly cronPartsCache = new Map<string, string[]>();
 
   /*
   |--------------------------------------------------------------------------
@@ -210,10 +198,14 @@ export class Schedule {
   }
 
   private matchesCronExpression(expression: string, date: Date): boolean {
-    const parts = expression.split(" ");
-    if (parts.length !== 5) {
-      console.warn(`[Scheduler] Invalid cron expression: ${expression}`);
-      return false;
+    let parts = this.cronPartsCache.get(expression);
+    if (!parts) {
+      parts = expression.split(" ");
+      if (parts.length !== 5) {
+        console.warn(`[Scheduler] Invalid cron expression: ${expression}`);
+        return false;
+      }
+      this.cronPartsCache.set(expression, parts);
     }
     const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
     return (
@@ -259,7 +251,8 @@ export class Schedule {
       if (task.conditions.length > 0) {
         const results = await Promise.all(task.conditions.map((fn) => fn()));
         if (!results.every(Boolean)) {
-          if (this.options.verbose) console.log(`[Scheduler] Skipping task (when() failed): ${task.name}`);
+          if (this.options.verbose)
+            console.log(`[Scheduler] Skipping task (when() failed): ${task.name}`);
           continue;
         }
       }
@@ -268,7 +261,8 @@ export class Schedule {
       if (task.skipConditions.length > 0) {
         const results = await Promise.all(task.skipConditions.map((fn) => fn()));
         if (results.some(Boolean)) {
-          if (this.options.verbose) console.log(`[Scheduler] Skipping task (skip() matched): ${task.name}`);
+          if (this.options.verbose)
+            console.log(`[Scheduler] Skipping task (skip() matched): ${task.name}`);
           continue;
         }
       }
@@ -295,7 +289,9 @@ export class Schedule {
           65,
         ).catch(() => false);
         if (!lockAcquired) {
-          console.log(`[Scheduler] Skipping task (onOneServer, another server has it): ${task.name}`);
+          console.log(
+            `[Scheduler] Skipping task (onOneServer, another server has it): ${task.name}`,
+          );
           continue;
         }
       }
@@ -398,28 +394,6 @@ export class Schedule {
 |--------------------------------------------------------------------------
 */
 
-export class TaskExpressionChangedEvent extends EloquentEvent {
-  constructor(public readonly task: ScheduledTask) {
-    super();
-  }
-  eventName(): string {
-    return "task:expression-changed";
-  }
-}
-
-@ListensTo(["task:expression-changed"])
-export class TaskExpressionChangedListener extends Listener {
-  handle(payload: TaskExpressionChangedEvent): void | Promise<void> {
-    const task = payload.task;
-    try {
-      const interval = parser.parse(task.expression, { tz: task.timezone || "UTC" });
-      task.nextRun = interval.next().toDate();
-    } catch {
-      // invalid expression
-    }
-  }
-}
-
 export class ScheduledTaskBuilder {
   constructor(private task: ScheduledTask) {}
 
@@ -429,18 +403,38 @@ export class ScheduledTaskBuilder {
   |--------------------------------------------------------------------------
   */
 
-  everyMinute(): this { return this.cron("* * * * *"); }
-  everyTwoMinutes(): this { return this.cron("*/2 * * * *"); }
-  everyThreeMinutes(): this { return this.cron("*/3 * * * *"); }
-  everyFiveMinutes(): this { return this.cron("*/5 * * * *"); }
-  everyTenMinutes(): this { return this.cron("*/10 * * * *"); }
-  everyFifteenMinutes(): this { return this.cron("*/15 * * * *"); }
-  everyTwentyMinutes(): this { return this.cron("*/20 * * * *"); }
-  everyThirtyMinutes(): this { return this.cron("*/30 * * * *"); }
-  everyFortyFiveMinutes(): this { return this.cron("*/45 * * * *"); }
+  everyMinute(): this {
+    return this.cron("* * * * *");
+  }
+  everyTwoMinutes(): this {
+    return this.cron("*/2 * * * *");
+  }
+  everyThreeMinutes(): this {
+    return this.cron("*/3 * * * *");
+  }
+  everyFiveMinutes(): this {
+    return this.cron("*/5 * * * *");
+  }
+  everyTenMinutes(): this {
+    return this.cron("*/10 * * * *");
+  }
+  everyFifteenMinutes(): this {
+    return this.cron("*/15 * * * *");
+  }
+  everyTwentyMinutes(): this {
+    return this.cron("*/20 * * * *");
+  }
+  everyThirtyMinutes(): this {
+    return this.cron("*/30 * * * *");
+  }
+  everyFortyFiveMinutes(): this {
+    return this.cron("*/45 * * * *");
+  }
 
   /** Run every N minutes (arbitrary interval). */
-  everyNMinutes(n: number): this { return this.cron(`*/${n} * * * *`); }
+  everyNMinutes(n: number): this {
+    return this.cron(`*/${n} * * * *`);
+  }
 
   /*
   |--------------------------------------------------------------------------
@@ -448,16 +442,30 @@ export class ScheduledTaskBuilder {
   |--------------------------------------------------------------------------
   */
 
-  hourly(): this { return this.cron("0 * * * *"); }
-  hourlyAt(minute: number): this { return this.cron(`${minute} * * * *`); }
-  everyTwoHours(): this { return this.cron("0 */2 * * *"); }
-  everyFourHours(): this { return this.cron("0 */4 * * *"); }
-  everySixHours(): this { return this.cron("0 */6 * * *"); }
+  hourly(): this {
+    return this.cron("0 * * * *");
+  }
+  hourlyAt(minute: number): this {
+    return this.cron(`${minute} * * * *`);
+  }
+  everyTwoHours(): this {
+    return this.cron("0 */2 * * *");
+  }
+  everyFourHours(): this {
+    return this.cron("0 */4 * * *");
+  }
+  everySixHours(): this {
+    return this.cron("0 */6 * * *");
+  }
 
   /** Run every N hours (arbitrary interval). */
-  everyNHours(n: number): this { return this.cron(`0 */${n} * * *`); }
+  everyNHours(n: number): this {
+    return this.cron(`0 */${n} * * *`);
+  }
 
-  daily(): this { return this.cron("0 0 * * *"); }
+  daily(): this {
+    return this.cron("0 0 * * *");
+  }
 
   dailyAt(time: string): this {
     const [hour, minute] = time.split(":").map(Number);
@@ -468,18 +476,27 @@ export class ScheduledTaskBuilder {
     return this.cron(`0 ${firstHour},${secondHour} * * *`);
   }
 
-  twiceDailyAt(firstHour: number, firstMinute: number, secondHour: number, secondMinute: number): this {
+  twiceDailyAt(
+    firstHour: number,
+    firstMinute: number,
+    secondHour: number,
+    secondMinute: number,
+  ): this {
     return this.cron(`${firstMinute} ${firstHour},${secondHour} * * *`);
   }
 
-  weekly(): this { return this.cron("0 0 * * 0"); }
+  weekly(): this {
+    return this.cron("0 0 * * 0");
+  }
 
   weeklyOn(dayOfWeek: number, time: string = "0:0"): this {
     const [hour, minute] = time.split(":").map(Number);
     return this.cron(`${minute ?? 0} ${hour} * * ${dayOfWeek}`);
   }
 
-  monthly(): this { return this.cron("0 0 1 * *"); }
+  monthly(): this {
+    return this.cron("0 0 1 * *");
+  }
 
   monthlyOn(day: number, time: string = "0:0"): this {
     const [hour, minute] = time.split(":").map(Number);
@@ -503,8 +520,12 @@ export class ScheduledTaskBuilder {
     return this;
   }
 
-  quarterly(): this { return this.cron("0 0 1 1,4,7,10 *"); }
-  yearly(): this { return this.cron("0 0 1 1 *"); }
+  quarterly(): this {
+    return this.cron("0 0 1 1,4,7,10 *");
+  }
+  yearly(): this {
+    return this.cron("0 0 1 1 *");
+  }
   yearlyOn(month: number, day: number = 1, time: string = "0:0"): this {
     const [hour, minute] = time.split(":").map(Number);
     return this.cron(`${minute ?? 0} ${hour} ${day} ${month} *`);
@@ -528,13 +549,27 @@ export class ScheduledTaskBuilder {
     return this.cron(parts.join(" "));
   }
 
-  sundays(): this   { return this._setDow("0"); }
-  mondays(): this   { return this._setDow("1"); }
-  tuesdays(): this  { return this._setDow("2"); }
-  wednesdays(): this{ return this._setDow("3"); }
-  thursdays(): this { return this._setDow("4"); }
-  fridays(): this   { return this._setDow("5"); }
-  saturdays(): this { return this._setDow("6"); }
+  sundays(): this {
+    return this._setDow("0");
+  }
+  mondays(): this {
+    return this._setDow("1");
+  }
+  tuesdays(): this {
+    return this._setDow("2");
+  }
+  wednesdays(): this {
+    return this._setDow("3");
+  }
+  thursdays(): this {
+    return this._setDow("4");
+  }
+  fridays(): this {
+    return this._setDow("5");
+  }
+  saturdays(): this {
+    return this._setDow("6");
+  }
 
   private _setDow(dow: string): this {
     const parts = this.task.expression.split(" ");
@@ -642,8 +677,3 @@ export class ScheduledTaskBuilder {
 
 // Singleton
 export const scheduler = new Schedule();
-
-// Register event listener for expression changes
-getEventDispatcher().listen("task:expression-changed", (payload: TaskExpressionChangedEvent) => {
-  new TaskExpressionChangedListener().handle(payload);
-});

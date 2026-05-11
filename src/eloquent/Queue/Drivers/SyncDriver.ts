@@ -30,7 +30,7 @@ export class SyncDriver implements QueueDriverInterface {
 
     while (job.attempts < maxTries && (job.exceptionCount ?? 0) < maxExceptions) {
       job.attempts += 1;
-      job.exceptionCount = (job.exceptionCount ?? 0);
+      job.exceptionCount = job.exceptionCount ?? 0;
 
       const instance = JobBase.deserialize(job);
       if (!instance) break;
@@ -43,8 +43,7 @@ export class SyncDriver implements QueueDriverInterface {
         lastError = error as Error;
         job.exceptionCount += 1;
 
-        const shouldRetry =
-          job.attempts < maxTries && job.exceptionCount < maxExceptions;
+        const shouldRetry = job.attempts < maxTries && job.exceptionCount < maxExceptions;
 
         if (!shouldRetry) break;
 

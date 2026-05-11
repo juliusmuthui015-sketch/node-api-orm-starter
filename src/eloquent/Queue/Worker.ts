@@ -26,6 +26,9 @@ export class Worker extends EventEmitter {
   private jobsProcessed: number = 0;
   private startTime: number = 0;
   private currentJob: SerializedJob | null = null;
+  // Throttle expensive per-tick cache checks to every N idle cycles
+  private idleTicks: number = 0;
+  private static readonly IDLE_CHECK_INTERVAL = 5;
 
   private connectionName: string;
   private queues: string[];
@@ -88,21 +91,7 @@ export class Worker extends EventEmitter {
         continue;
       }
 
-      // Maintenance mode: pause unless force flag is set
-      if (!this.options.force && (await this.isInMaintenanceMode())) {
-        if (this.options.verbose) {
-          console.log("[Worker] Application in maintenance mode, sleeping...");
-        }
-        await this.sleep(this.options.sleep * 1000);
-        continue;
-      }
-
-      if (this.memoryExceeded()) {
-        console.log("[Worker] Memory limit exceeded, stopping...");
-        this.stop();
-        break;
-      }
-
+      // Cheap synchronous guards — run every tick
       if (this.options.maxJobs > 0 && this.jobsProcessed >= this.options.maxJobs) {
         console.log(`[Worker] Max jobs (${this.options.maxJobs}) reached, stopping...`);
         this.stop();
@@ -118,16 +107,40 @@ export class Worker extends EventEmitter {
         }
       }
 
-      // Check for restart signal from cache (set by queue:restart command)
-      if (await this.shouldRestart()) {
-        console.log("[Worker] Restart signal detected, stopping...");
-        this.stop();
-        break;
+      // Expensive async checks (cache/memory) batched every IDLE_CHECK_INTERVAL idle ticks
+      // or always after a job runs (idleTicks reset to 0 after processing).
+      if (this.idleTicks % Worker.IDLE_CHECK_INTERVAL === 0) {
+        if (this.memoryExceeded()) {
+          console.log("[Worker] Memory limit exceeded, stopping...");
+          this.stop();
+          break;
+        }
+
+        // Batch both cache lookups in parallel instead of sequential awaits
+        const [inMaintenance, restart] = await Promise.all([
+          this.options.force ? Promise.resolve(false) : this.isInMaintenanceMode(),
+          this.shouldRestart(),
+        ]);
+
+        if (restart) {
+          console.log("[Worker] Restart signal detected, stopping...");
+          this.stop();
+          break;
+        }
+
+        if (inMaintenance) {
+          if (this.options.verbose)
+            console.log("[Worker] Application in maintenance mode, sleeping...");
+          this.idleTicks++;
+          await this.sleep(this.options.sleep * 1000);
+          continue;
+        }
       }
 
       const job = await this.getNextJob();
 
       if (job) {
+        this.idleTicks = 0;
         await this.process(job);
         this.jobsProcessed++;
 
@@ -140,6 +153,7 @@ export class Worker extends EventEmitter {
           this.stop();
           break;
         }
+        this.idleTicks++;
         await this.sleep(this.options.sleep * 1000);
       }
     }
@@ -215,11 +229,16 @@ export class Worker extends EventEmitter {
       }
 
       const timeoutMs = (serializedJob.timeout || this.options.timeout) * 1000;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("Job timed out")), timeoutMs);
+        timeoutHandle = setTimeout(() => reject(new Error("Job timed out")), timeoutMs);
       });
 
-      await Promise.race([job.handle(), timeoutPromise]);
+      try {
+        await Promise.race([job.handle(), timeoutPromise]);
+      } finally {
+        clearTimeout(timeoutHandle);
+      }
 
       await this.handleSuccess(serializedJob);
     } catch (error) {
@@ -254,9 +273,7 @@ export class Worker extends EventEmitter {
     const retryUntilExpired = job.retryUntil != null && Date.now() > job.retryUntil;
 
     const shouldFailPermanently =
-      retryUntilExpired ||
-      job.attempts >= maxTries ||
-      job.exceptionCount >= maxExceptions;
+      retryUntilExpired || job.attempts >= maxTries || job.exceptionCount >= maxExceptions;
 
     const driver = Queue.connection(this.connectionName);
 

@@ -1,15 +1,15 @@
 import {
+  MailableInterface,
+  MailAddress,
   MailDriverInterface,
+  MailerInterface,
+  MailEventPayload,
+  MailManagerInterface,
   MailMessage,
   SendMailResult,
-  MailerInterface,
-  MailableInterface,
-  MailManagerInterface,
-  MailAddress,
-  MailEventPayload,
 } from "../Mail/types";
-import { SmtpDriver, LogDriver, ArrayDriver, FailoverDriver } from "../Mail/Drivers";
-import mailConfig from "@/config/mail.config";
+import { ArrayDriver, FailoverDriver, LogDriver, SmtpDriver } from "../Mail/Drivers";
+import mailConfig, { MailerConfig } from "@/config/mail.config";
 import { getEventDispatcher } from "../Events";
 
 /*
@@ -67,6 +67,17 @@ export class MailManager implements MailManagerInterface {
     const config = mailConfig.mailers[name];
     if (!config) {
       throw new Error(`Mail driver [${name}] is not configured.`);
+    }
+
+    return this.createDriverFromConfig(name, config);
+  }
+
+  /**
+   * Create a driver instance from config.
+   */
+  private createDriverFromConfig(name: string, config: MailerConfig): MailDriverInterface {
+    if (this.drivers.has(name)) {
+      return this.drivers.get(name)!;
     }
 
     let driver: MailDriverInterface;
@@ -138,6 +149,18 @@ export class MailManager implements MailManagerInterface {
    */
   getDefaultDriver(): string {
     return mailConfig.default;
+  }
+
+  /**
+   * Create a mailer with custom configuration.
+   */
+  async withConfig(config: Partial<MailerConfig>): Promise<Mailer> {
+    const tempMailerName = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const baseConfig = mailConfig.mailers[mailConfig.default];
+    const mergedConfig = { ...baseConfig, ...config } as MailerConfig;
+
+    const driver = this.createDriverFromConfig(tempMailerName, mergedConfig);
+    return new Mailer(driver, tempMailerName);
   }
 }
 
@@ -348,6 +371,13 @@ export class Mailer implements MailerInterface {
  */
 export function Mail(): MailManager {
   return MailManager.getInstance();
+}
+
+/**
+ * Create a mailer with custom configuration.
+ */
+export async function MailWithConfig(config: Partial<MailerConfig>): Promise<Mailer> {
+  return Mail().withConfig(config);
 }
 
 /**

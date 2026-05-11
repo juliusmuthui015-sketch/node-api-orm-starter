@@ -10,12 +10,16 @@ import queueConfig from "@/config/queue.config";
 | Uses APP_KEY from environment, same pattern as auth.ts.
 */
 
+let _encryptionKey: Buffer | undefined;
 function getEncryptionKey(): Buffer {
+  if (_encryptionKey) return _encryptionKey;
   const raw = process.env.APP_KEY;
   if (!raw) throw new Error("APP_KEY is not set — cannot encrypt job payload.");
   const stripped = raw.replace(/^base64:/, "");
   const decoded = Buffer.from(stripped, "base64");
-  return decoded.length === 32 ? decoded : crypto.createHash("sha256").update(decoded).digest();
+  _encryptionKey =
+    decoded.length === 32 ? decoded : crypto.createHash("sha256").update(decoded).digest();
+  return _encryptionKey;
 }
 
 export function encryptPayload(data: string): string {

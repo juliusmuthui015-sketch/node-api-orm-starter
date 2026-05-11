@@ -30,28 +30,21 @@ class QueueManager {
 
   /**
    * Get a queue connection instance.
-   * For Redis, we cache the connection to reuse the same client.
-   * For Database, we create fresh instances to ensure queries aren't cached.
+   * All drivers are cached — database queries are stateless per-call so sharing
+   * the driver instance is safe and avoids repeated object allocation on every poll.
    */
   connection(name?: string): QueueDriverInterface {
     const connectionName = name || this.defaultConnection;
-    const config = queueConfig.connections[connectionName];
 
-    if (!config) {
-      throw new Error(`Queue connection [${connectionName}] is not defined.`);
-    }
-
-    // For Redis, cache the connection to maintain persistent connection
-    if (config.driver === "redis") {
-      if (!this.connections.has(connectionName)) {
-        this.connections.set(connectionName, this.resolve(connectionName));
+    if (!this.connections.has(connectionName)) {
+      const config = queueConfig.connections[connectionName];
+      if (!config) {
+        throw new Error(`Queue connection [${connectionName}] is not defined.`);
       }
-      return this.connections.get(connectionName)!;
+      this.connections.set(connectionName, this.resolve(connectionName));
     }
 
-    // For other drivers (database, sync), create fresh instance
-    // This ensures database queries are not cached
-    return this.resolve(connectionName);
+    return this.connections.get(connectionName)!;
   }
 
   /**
@@ -108,12 +101,11 @@ class QueueManager {
    * Respects uniqueId/uniqueFor — silently deduplicates if a lock already exists.
    */
   async push(job: Job, queue?: string): Promise<string> {
-    // Unique job enforcement
+    // Unique job enforcement — single cache read instead of has() + get()
     if (job.uniqueId) {
       const lockKey = `queue:unique:${job.uniqueId}`;
-      const alreadyQueued = await Cache.has(lockKey).catch(() => false);
-      if (alreadyQueued) {
-        const existingUuid = await Cache.get(lockKey).catch(() => null);
+      const existingUuid = await Cache.get(lockKey).catch(() => null);
+      if (existingUuid != null) {
         return (existingUuid as string) ?? job.uniqueId;
       }
       const ttl = job.uniqueFor && job.uniqueFor > 0 ? job.uniqueFor : null;
@@ -161,14 +153,7 @@ class QueueManager {
    * Push multiple jobs onto the queue.
    */
   async bulk(jobs: Job[], queue?: string): Promise<string[]> {
-    const results: string[] = [];
-
-    for (const job of jobs) {
-      const id = await this.push(job, queue);
-      results.push(id);
-    }
-
-    return results;
+    return Promise.all(jobs.map((job) => this.push(job, queue)));
   }
 
   /**
